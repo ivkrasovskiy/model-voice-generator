@@ -152,3 +152,5 @@ weasel==0.3.4
 Werkzeug==3.0.1
 wrapt==1.12.1
 yarl==1.9.4
+ffmpeg-python==0.2.0
+openai-whisper==20240930
