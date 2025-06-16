@@ -1,3 +1,4 @@
 .venv/
 raw_cumberbatch_data/
 dataset/
+.DS_Store
