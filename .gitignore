@@ -1,6 +1,12 @@
 .venv/
+.venv-f5/
 raw_cumberbatch_data/
 dataset/
+tts_output/
+coqui-ai-TTS/
 .DS_Store
 .env
 .cache
+benedict_voice_finetune/
+__pycache__/
+*.pyc
