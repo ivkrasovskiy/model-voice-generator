@@ -1,0 +1,43 @@
+[project]
+name = "model-voice-generator"
+version = "0.1.0"
+description = "Benedict Cumberbatch voice cloning — zero-shot TTS and dataset pipeline"
+requires-python = ">=3.10,<3.12"
+dependencies = [
+    # Zero-shot inference
+    "f5-tts",
+    "TTS>=0.22.0",          # Coqui, for XTTS-v2 (cached model)
+    # PyTorch — Apple Silicon (MPS) compatible via standard PyPI wheels
+    "torch>=2.1.0",
+    "torchaudio>=2.1.0",
+    # Audio processing
+    "librosa",
+    "soundfile",
+    "pydub",
+    "ffmpeg-python",
+    # Dataset pipeline
+    "openai-whisper",       # transcription (large-v3)
+    "pyannote.audio>=3.1",  # speaker diarization
+    "silero-vad",           # VAD segmentation
+    "pandas",
+    "numpy",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+# Minimal install for inference only (no dataset work)
+inference = [
+    "f5-tts",
+    "torch>=2.1.0",
+    "torchaudio>=2.1.0",
+    "soundfile",
+]
+
+[tool.uv]
+# Use system Python 3.10 (Apple Silicon compatible)
+python-preference = "only-managed"
+# PyTorch wheels from PyPI support MPS natively — no special index needed
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
