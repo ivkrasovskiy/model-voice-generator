@@ -38,6 +38,15 @@ DNSMOS_URL = "https://raw.githubusercontent.com/microsoft/DNS-Challenge/master/D
 REF_AUDIO = PROJECT_ROOT / "tts_output/ref_narrator.wav"
 REF_TEXT = "this an ideal opportunity for obtaining from her everything I wished."
 
+# Inference knobs — overridden from CLI in main(); module-level so the gen helpers
+# can read them without threading kwargs through every call.
+_CFG_STRENGTH = 2.0  # F5-TTS default
+_NFE_STEP = 32       # F5-TTS default
+_SEED = 42           # F5-TTS infer seed — fixed for reproducibility across runs
+_FIRST_N = None      # if set, run only the first N phrases (subset early-stop)
+_CENTROID_DIR: Path | None = None  # if set, compute "Cumberbatch identity centroid" from N random WAVs here
+_CENTROID_N = 10     # number of clips averaged into the centroid
+
 # Six eval phrases, all ≤ 80 chars (F5-TTS single-batch limit → no compounding NaN).
 # Each targets a different axis of voice identity / generalization:
 #  - stella_short: backward-compat with earlier scores (Speech Accent Archive control)
@@ -171,9 +180,17 @@ def _mps_reset():
 
 
 def _gen_segment_with_retry(tts, segment: str, max_retries: int = 5):
-    """Generate a single ≤50-char segment with retry. Returns (wav_np, sr) or (None, None)."""
+    """Generate a single ≤50-char segment with retry. Returns (wav_np, sr) or (None, None).
+
+    Each retry uses seed + attempt to vary the noise — same config still produces the
+    same first-attempt waveform, so runs are reproducible.
+    """
     for attempt in range(1, max_retries + 1):
-        wav, sr, _ = tts.infer(ref_file=str(REF_AUDIO), ref_text=REF_TEXT, gen_text=segment)
+        wav, sr, _ = tts.infer(
+            ref_file=str(REF_AUDIO), ref_text=REF_TEXT, gen_text=segment,
+            cfg_strength=_CFG_STRENGTH, nfe_step=_NFE_STEP,
+            seed=_SEED + (attempt - 1),
+        )
         w = wav.squeeze() if hasattr(wav, "squeeze") else wav
         w = np.asarray(w, dtype=np.float32)
         finite = np.isfinite(w).all()
@@ -241,6 +258,32 @@ def compute_ecapa_emb(wav: np.ndarray, sr: int, ecapa) -> np.ndarray:
     with torch.no_grad():
         emb = ecapa.encode_batch(t).squeeze().cpu().numpy()
     return emb
+
+
+def compute_ref_centroid(centroid_dir: Path, n_samples: int, ecapa, seed: int) -> np.ndarray:
+    """Embed N random WAVs from centroid_dir and average → 'Cumberbatch identity centroid'.
+
+    More robust speaker target than a single ref clip: gen-vs-centroid measures
+    'how Cumberbatch-like' rather than 'how like this one clip'. Deterministic
+    via seed (same N clips picked every run).
+    """
+    import random
+    wav_dir = centroid_dir / "wavs" if (centroid_dir / "wavs").is_dir() else centroid_dir
+    wavs = sorted(wav_dir.glob("*.wav"))
+    if len(wavs) < n_samples:
+        raise RuntimeError(f"Only {len(wavs)} WAVs in {wav_dir}, need {n_samples}")
+    rng = random.Random(seed)
+    picked = rng.sample(wavs, n_samples)
+    print(f"  centroid: averaging {n_samples} ECAPA embeddings from {wav_dir.name}/")
+    embs = []
+    for p in picked:
+        w, sr = sf.read(str(p))
+        if w.ndim > 1:
+            w = w.mean(axis=1)
+        embs.append(compute_ecapa_emb(w.astype(np.float32), sr, ecapa))
+    centroid = np.mean(np.stack(embs, axis=0), axis=0)
+    print(f"  centroid norm={np.linalg.norm(centroid):.3f}  (single-clip avg norm={np.mean([np.linalg.norm(e) for e in embs]):.3f})")
+    return centroid
 
 
 def cosine(a, b):
@@ -314,6 +357,7 @@ def aggregate(rows: list[dict]) -> dict:
 
     w_mean, w_std, n = m("wer")
     e_mean, e_std, _ = m("ecapa_sim")
+    ec_mean, ec_std, _ = m("ecapa_centroid_sim")
     sig_mean, _, _ = m("dnsmos_sig")
     bak_mean, _, _ = m("dnsmos_bak")
     ovr_mean, _, _ = m("dnsmos_ovr")
@@ -321,6 +365,7 @@ def aggregate(rows: list[dict]) -> dict:
         "n_scored": n,
         "wer_mean": w_mean, "wer_std": w_std,
         "ecapa_sim_mean": e_mean, "ecapa_sim_std": e_std,
+        "ecapa_centroid_mean": ec_mean, "ecapa_centroid_std": ec_std,
         "dnsmos_sig_mean": sig_mean, "dnsmos_bak_mean": bak_mean, "dnsmos_ovr_mean": ovr_mean,
     }
 
@@ -392,7 +437,7 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
     ecapa = load_ecapa(device="cpu")
     dnsmos_session = load_dnsmos()
 
-    # Reference embedding
+    # Single-ref embedding (gen-vs-the-12s-narrator-clip)
     ref_wav, ref_sr = sf.read(str(REF_AUDIO))
     if ref_wav.ndim > 1:
         ref_wav = ref_wav.mean(axis=1)
@@ -400,12 +445,20 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
     ecapa_ref_emb = compute_ecapa_emb(ref_wav, ref_sr, ecapa)
     print(f"  ECAPA ref embedding: dim={ecapa_ref_emb.shape[0]}, norm={np.linalg.norm(ecapa_ref_emb):.3f}")
 
+    # Optional multi-ref centroid (gen-vs-'Cumberbatch identity'). More robust
+    # speaker target than a single 12s clip.
+    centroid_emb = None
+    if _CENTROID_DIR is not None:
+        centroid_emb = compute_ref_centroid(_CENTROID_DIR, _CENTROID_N, ecapa, _SEED)
+
+    NAN_ROW = {"wer": np.nan, "ecapa_sim": np.nan, "ecapa_centroid_sim": np.nan,
+               "dnsmos_sig": np.nan, "dnsmos_bak": np.nan, "dnsmos_ovr": np.nan,
+               "transcript": ""}
+
     per_clip = []  # raw per-(config, phrase) rows for the detailed CSV
     for entry in manifest:
         if not entry["wav_path"]:
-            per_clip.append({**entry, "wer": np.nan, "ecapa_sim": np.nan,
-                             "dnsmos_sig": np.nan, "dnsmos_bak": np.nan,
-                             "dnsmos_ovr": np.nan, "transcript": ""})
+            per_clip.append({**entry, **NAN_ROW})
             continue
         try:
             wav_np, sr = sf.read(entry["wav_path"])
@@ -414,9 +467,7 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
             wav_np = wav_np.astype(np.float32)
         except Exception as e:
             print(f"  {entry['label']}/{entry['slug']}: read failed: {e}")
-            per_clip.append({**entry, "wer": np.nan, "ecapa_sim": np.nan,
-                             "dnsmos_sig": np.nan, "dnsmos_bak": np.nan,
-                             "dnsmos_ovr": np.nan, "transcript": ""})
+            per_clip.append({**entry, **NAN_ROW})
             continue
 
         # Each metric computed independently — one failure doesn't wipe the others
@@ -427,9 +478,12 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
             print(f"    WER failed: {e}")
 
         ecapa_sim = np.nan
+        ecapa_centroid_sim = np.nan
         try:
             gen_emb = compute_ecapa_emb(wav_np, sr, ecapa)
             ecapa_sim = cosine(ecapa_ref_emb, gen_emb)
+            if centroid_emb is not None:
+                ecapa_centroid_sim = cosine(centroid_emb, gen_emb)
         except Exception as e:
             print(f"    ECAPA failed: {e}")
 
@@ -439,12 +493,15 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
         except Exception as e:
             print(f"    DNSMOS failed: {e}")
 
-        print(f"  {entry['label']}/{entry['slug']}: wer={wer:.3f} "
-              f"ecapa={ecapa_sim:.4f} sig={mos['sig']:.2f} "
-              f"bak={mos['bak']:.2f} ovr={mos['ovr']:.2f}")
+        ecapa_str = f"ecapa={ecapa_sim:.4f}"
+        if centroid_emb is not None:
+            ecapa_str += f" cent={ecapa_centroid_sim:.4f}"
+        print(f"  {entry['label']}/{entry['slug']}: wer={wer:.3f} {ecapa_str} "
+              f"sig={mos['sig']:.2f} bak={mos['bak']:.2f} ovr={mos['ovr']:.2f}")
         if isinstance(wer, float) and wer > 0.1:
             print(f"    (whisper heard: \"{hyp[:100]}\")")
         per_clip.append({**entry, "wer": wer, "ecapa_sim": ecapa_sim,
+                         "ecapa_centroid_sim": ecapa_centroid_sim,
                          "dnsmos_sig": mos["sig"], "dnsmos_bak": mos["bak"],
                          "dnsmos_ovr": mos["ovr"], "transcript": hyp})
 
@@ -463,6 +520,7 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
     # Write CSVs
     detail_csv = out_dir / "scores_detail.csv"
     detail_fields = ["label", "step", "slug", "prompt", "wer", "ecapa_sim",
+                     "ecapa_centroid_sim",
                      "dnsmos_sig", "dnsmos_bak", "dnsmos_ovr", "transcript", "wav_path"]
     with detail_csv.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=detail_fields)
@@ -473,6 +531,7 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
     summary_csv = out_dir / "scores.csv"
     fields = ["label", "step", "n_scored", "wer_mean", "wer_std",
               "ecapa_sim_mean", "ecapa_sim_std",
+              "ecapa_centroid_mean", "ecapa_centroid_std",
               "dnsmos_sig_mean", "dnsmos_bak_mean", "dnsmos_ovr_mean", "listen_paths"]
     with summary_csv.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields)
@@ -483,12 +542,13 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
     print(f"\n✓ Summary CSV → {summary_csv}")
     print(f"✓ Per-clip detail → {detail_csv}")
 
-    print("\n=== Summary (WER ↓ better, ECAPA/DNSMOS ↑ better) ===")
+    print("\n=== Summary (WER ↓ better, ECAPA/CENT/DNSMOS ↑ better) ===")
     print(f"  {'label':<22} {'step':>6} {'n':>3}  "
-          f"{'WER':>6}  {'ECAPA':>7}  {'SIG':>5}  {'BAK':>5}  {'OVR':>5}")
+          f"{'WER':>6}  {'ECAPA':>7}  {'CENT':>7}  {'SIG':>5}  {'BAK':>5}  {'OVR':>5}")
     for r in agg_rows:
+        cent_str = f"{r['ecapa_centroid_mean']:>7.4f}" if not np.isnan(r["ecapa_centroid_mean"]) else "    n/a"
         print(f"  {r['label']:<22} {r['step']:>6} {r['n_scored']:>3}  "
-              f"{r['wer_mean']:>6.3f}  {r['ecapa_sim_mean']:>7.4f}  "
+              f"{r['wer_mean']:>6.3f}  {r['ecapa_sim_mean']:>7.4f}  {cent_str}  "
               f"{r['dnsmos_sig_mean']:>5.2f}  {r['dnsmos_bak_mean']:>5.2f}  {r['dnsmos_ovr_mean']:>5.2f}")
     return agg_rows
 
@@ -505,7 +565,36 @@ def main():
                         help="Only generate/score this phrase slug (e.g. stella_short)")
     parser.add_argument("--score-only", action="store_true",
                         help="Skip phase 1; score existing WAVs in out-dir using manifest.json")
+    parser.add_argument("--cfg-strength", type=float, default=2.0,
+                        help="F5-TTS classifier-free guidance strength (default 2.0)")
+    parser.add_argument("--nfe-step", type=int, default=32,
+                        help="F5-TTS ODE solver steps (default 32)")
+    parser.add_argument("--baseline-only", action="store_true",
+                        help="Skip checkpoint generation; score baseline only")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="F5-TTS inference seed — fixed for reproducibility across runs")
+    parser.add_argument("--first-n", type=int, default=None,
+                        help="Run only the first N phrases (subset early-stop)")
+    parser.add_argument("--centroid-dir", default=None,
+                        help="Dir of Cumberbatch WAVs to embed for 'identity centroid' ECAPA target "
+                             "(e.g. data/cumberbatch_casanova). Defaults to single-ref ECAPA only.")
+    parser.add_argument("--centroid-n", type=int, default=10,
+                        help="Number of clips to average into the identity centroid (default 10)")
     args = parser.parse_args()
+
+    # Set module-level knobs before phase1_generate / phase2_score use them
+    global _CFG_STRENGTH, _NFE_STEP, _SEED, _FIRST_N, _CENTROID_DIR, _CENTROID_N
+    _CFG_STRENGTH = args.cfg_strength
+    _NFE_STEP = args.nfe_step
+    _SEED = args.seed
+    _FIRST_N = args.first_n
+    _CENTROID_DIR = (PROJECT_ROOT / args.centroid_dir).resolve() if args.centroid_dir else None
+    _CENTROID_N = args.centroid_n
+    print(f"Inference knobs: cfg_strength={_CFG_STRENGTH}, nfe_step={_NFE_STEP}, seed={_SEED}")
+    if _FIRST_N is not None:
+        print(f"Subset mode: first-{_FIRST_N} phrases only")
+    if _CENTROID_DIR is not None:
+        print(f"Identity centroid: {_CENTROID_N} clips from {_CENTROID_DIR}")
 
     run_dir = PROJECT_ROOT / "runs" / args.run_name
     ckpt_dir = run_dir / "checkpoints"
@@ -513,15 +602,21 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     listen_ckpts = []
-    for name in args.listen_checkpoints:
-        p = ckpt_dir / name
-        if not p.exists():
-            print(f"  WARN: {p} missing — skipping")
-            continue
-        listen_ckpts.append(p)
-    if not listen_ckpts:
-        print("No checkpoints to eval — aborting.")
-        return
+    if not args.baseline_only:
+        for name in args.listen_checkpoints:
+            p = ckpt_dir / name
+            if not p.exists():
+                print(f"  WARN: {p} missing — skipping")
+                continue
+            listen_ckpts.append(p)
+        if not listen_ckpts:
+            print("No checkpoints to eval — aborting.")
+            return
+    else:
+        if args.skip_baseline:
+            print("--baseline-only and --skip-baseline are mutually exclusive — aborting.")
+            return
+        print("Baseline-only mode: skipping checkpoint generation")
 
     # Filter phrases if requested
     global EVAL_PHRASES
@@ -531,6 +626,9 @@ def main():
             print(f"No phrase with slug '{args.only_slug}' — available: {[s for s,_ in EVAL_PHRASES]}")
             return
         print(f"Running only phrase: {args.only_slug}")
+    if _FIRST_N is not None:
+        EVAL_PHRASES = EVAL_PHRASES[:_FIRST_N]
+        print(f"Running first {len(EVAL_PHRASES)} phrases: {[s for s,_ in EVAL_PHRASES]}")
 
     manifest_path = out_dir / "manifest.json"
     if args.score_only and manifest_path.exists():
