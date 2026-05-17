@@ -74,9 +74,9 @@ All scripts run from the single uv-managed venv. Activate with `uv run python <s
 - XTTS-v2 model is cached at `~/Library/Application Support/tts/tts_models--multilingual--multi-dataset--xtts_v2/`
 - Run: `source .venv-f5/bin/activate && python scripts/f5_infer.py --ref tts_output/ref_narrator.wav --ref-text "..." --text "..."`
 
-**Path B — fine-tune (for max fidelity):**
+**Path B — fine-tune (built and tested):**
 
-Dataset pipeline (run in order; everything but step 5 is built):
+Full pipeline orchestrated by `scripts/continue_pipeline.sh` (waits for transcripts, then runs everything):
 
 ```bash
 # 1. Re-segment Casanova at silence boundaries (3–12 s clips)
@@ -98,8 +98,16 @@ the 5 sub-clusters are all in a narrow RMS band (0.030–0.042) and all contain 
 narrator content. Casanova is genuinely uniform — **filtering character voices is not
 needed for this book**. The intra-book consistency holds at the segment level too.
 
-5. **(Not built yet)** Fine-tune XTTS-v2 or StyleTTS2 on a rented 24 GB GPU
-   (RunPod/Colab); inference locally on MPS. Do not revive the Tacotron2/Coqui path.
+5. **F5-TTS fine-tune** with `scripts/finetune_f5.py` — partial training (last 4 of 22 DiT
+   transformer blocks + output projection = ~61M trainable params, 18% of full model).
+   Uses Adafactor optimizer to fit in 18 GB RAM. Verified locally: forward+backward
+   passes work, loss starts ~1.3.
+
+6. **Compare baseline vs fine-tuned** with `scripts/compare_voices.py` — generates the
+   same test sentences both ways for A/B listening.
+
+For higher-quality production fine-tune, rent a 24 GB+ GPU and remove the freeze
+(unfreeze all 22 blocks, use Adam optimizer, larger batch size).
 
 ## Environment
 

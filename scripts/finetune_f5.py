@@ -61,8 +61,9 @@ def load_pretrained_f5tts(device: str):
     n_mel_channels = 100
     target_sample_rate = 24000
 
-    f5_dir = Path(f5_tts.__file__).parent
-    tokenizer_path = f5_dir / "infer/examples/vocab.txt"
+    # Find vocab.txt via importlib.resources (works with namespace packages)
+    from importlib.resources import files
+    tokenizer_path = files("f5_tts.infer.examples").joinpath("vocab.txt")
 
     vocab_char_map, vocab_size = get_tokenizer(str(tokenizer_path), "custom")
     transformer = DiT(**model_cfg, text_num_embeds=vocab_size, mel_dim=n_mel_channels)
@@ -163,7 +164,6 @@ def train(args):
 
     import torchaudio
     from f5_tts.model.modules import MelSpec
-    from f5_tts.model.utils import convert_char_to_pinyin, list_str_to_tensor
 
     mel_spec = MelSpec(
         n_fft=1024, hop_length=256, win_length=1024,
@@ -221,12 +221,9 @@ def train(args):
                 mel = mel_spec(wav)  # (1, n_mel, T)
             mel = mel.transpose(1, 2)  # (1, T, n_mel)
 
-            # Tokenize text via pinyin (default F5-TTS pipeline)
-            pinyin = convert_char_to_pinyin([entry["text"]])
-            text_tensor = list_str_to_tensor(pinyin, vocab_char_map).to(device)
-
+            # F5-TTS CFM accepts text as list[str] and tokenizes internally
             mel_lengths = torch.tensor([mel.shape[1]], device=device)
-            outputs = cfm(mel, text=text_tensor, lens=mel_lengths)
+            outputs = cfm(mel, text=[entry["text"]], lens=mel_lengths)
 
             # CFM returns (loss, cond, pred) or similar — pull the loss tensor
             if isinstance(outputs, tuple):
