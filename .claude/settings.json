@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '{print $1, $2, $11, $12, $13}')",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(.venv/bin/python scripts/posthoc_eval.py --listen-checkpoints step_000500.pt --score-only)",
+      "Bash(tee runs/posthoc_score_only.log)",
+      "Bash(ps -p 49065 -o pid,stat,rss,etime)",
+      "Bash(nohup .venv/bin/python scripts/posthoc_eval.py --run-name finetune_casanova_8blk --listen-checkpoints step_001500.pt --only-slug stella_short --skip-baseline --out-dir tts_output/posthoc_8blk_1500)",
+      "Bash(echo \"Launched PID=$! at $\\(date\\)\")",
+      "Bash(/Users/ivkrasovskii/model-voice-generator/scripts/status.sh)",
+      "Bash(pkill -f \"scripts/posthoc_eval\\\\.py\")",
+      "Bash(PYTHONHASHSEED=random .venv/bin/python scripts/posthoc_eval.py --run-name finetune_casanova_8blk --listen-checkpoints step_001000.pt step_001500.pt --out-dir tts_output/posthoc_6phrase)",
+      "Bash(file *.wav)"
+    ]
+  }
+}

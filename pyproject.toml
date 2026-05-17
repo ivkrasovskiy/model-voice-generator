@@ -30,6 +30,14 @@ dependencies = [
     "safetensors",
     # Optional: silero-vad via torch.hub doesn't need this package, but having it pinned is cleaner
     "silero-vad",
+    "python-dotenv>=1.2.2",
+    # Fine-tune observability + eval
+    "tensorboard",
+    "resemblyzer",
+    # Richer posthoc eval metrics
+    "jiwer",          # Word Error Rate (Whisper transcript vs prompt)
+    "speechbrain",    # ECAPA-TDNN speaker similarity (SOTA voxceleb embedding)
+    "onnxruntime",    # DNSMOS audio-quality MOS prediction
 ]
 
 [tool.uv]
