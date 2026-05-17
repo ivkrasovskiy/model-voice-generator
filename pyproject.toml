@@ -1,12 +1,13 @@
 [project]
 name = "model-voice-generator"
 version = "0.1.0"
-description = "Benedict Cumberbatch voice cloning — zero-shot TTS and dataset pipeline"
+description = "Benedict Cumberbatch voice cloning — zero-shot TTS, dataset pipeline, fine-tuning"
 requires-python = ">=3.10,<3.12"
 dependencies = [
-    # Zero-shot inference
+    # Zero-shot TTS
     "f5-tts",
-    "TTS>=0.22.0",          # Coqui, for XTTS-v2 (cached model)
+    # Transcription
+    "openai-whisper",
     # PyTorch — Apple Silicon (MPS) compatible via standard PyPI wheels
     "torch>=2.1.0",
     "torchaudio>=2.1.0",
@@ -15,29 +16,22 @@ dependencies = [
     "soundfile",
     "pydub",
     "ffmpeg-python",
-    # Dataset pipeline
-    "openai-whisper",       # transcription (large-v3)
-    "pyannote.audio>=3.1",  # speaker diarization
-    "silero-vad",           # VAD segmentation
+    # Analysis
+    "scikit-learn",
+    "matplotlib",
     "pandas",
     "numpy",
     "tqdm",
-]
-
-[project.optional-dependencies]
-# Minimal install for inference only (no dataset work)
-inference = [
-    "f5-tts",
-    "torch>=2.1.0",
-    "torchaudio>=2.1.0",
-    "soundfile",
+    # HuggingFace ecosystem (for model downloads, fine-tuning)
+    "huggingface_hub[cli]",
+    "accelerate",
+    "datasets",
+    "transformers",
+    "safetensors",
+    # Optional: silero-vad via torch.hub doesn't need this package, but having it pinned is cleaner
+    "silero-vad",
 ]
 
 [tool.uv]
-# Use system Python 3.10 (Apple Silicon compatible)
 python-preference = "only-managed"
-# PyTorch wheels from PyPI support MPS natively — no special index needed
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+package = false   # this is a research repo, not a distributable package

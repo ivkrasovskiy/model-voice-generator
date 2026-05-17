@@ -24,8 +24,17 @@ Usage (Python API):
 """
 
 import argparse
+import os
+import sys
 import warnings
 from pathlib import Path
+
+# F5-TTS spawns subprocesses that re-init Python; if PYTHONHASHSEED is set to
+# empty string (uv-venv quirk), Python crashes at startup. Re-exec self with
+# a valid value before importing anything heavy.
+if os.environ.get("PYTHONHASHSEED", "missing") == "":
+    os.environ["PYTHONHASHSEED"] = "random"
+    os.execv(sys.executable, [sys.executable, __file__] + sys.argv[1:])
 
 warnings.filterwarnings("ignore")
 

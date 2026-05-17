@@ -10,3 +10,6 @@ coqui-ai-TTS/
 benedict_voice_finetune/
 __pycache__/
 *.pyc
+logs/
+runs/
+data/
