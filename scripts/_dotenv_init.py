@@ -64,3 +64,59 @@ def init_env_then_reexec(script_file: str) -> None:
     if needs_reexec:
         # Re-exec self so that Python's own hash-seed init reads the new value
         os.execv(sys.executable, [sys.executable, script_file] + sys.argv[1:])
+
+
+def kill_stale_python(extra_patterns: list[str] | None = None) -> int:
+    """Kill stale F5-TTS / eval / Whisper Python procs to free MPS memory.
+
+    Each main() call should invoke this at the top — orphans from previous
+    runs (even "successful" ones) accumulate and OOM the next launch on the
+    18 GB M3 Pro. Excludes the current PID so it's safe to call from inside
+    the very process you don't want to kill.
+
+    Returns the number of processes killed.
+    """
+    import re
+    import signal
+    import subprocess
+    import time
+
+    patterns = [
+        r"scripts/finetune_f5\.py",
+        r"scripts/posthoc_eval\.py",
+        r"scripts/f5_infer\.py",
+    ]
+    if extra_patterns:
+        patterns.extend(extra_patterns)
+    combined = "|".join(patterns)
+    my_pid = os.getpid()
+
+    try:
+        r = subprocess.run(["pgrep", "-fl", combined],
+                           capture_output=True, text=True, timeout=5)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return 0
+    if r.returncode != 0:
+        return 0  # no matches
+
+    killed = 0
+    for line in r.stdout.splitlines():
+        parts = line.strip().split(None, 1)
+        if not parts:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        if pid == my_pid:
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed += 1
+            print(f"  [kill_stale_python] SIGTERM → PID {pid}: {parts[1][:80] if len(parts) > 1 else ''}",
+                  file=sys.stderr)
+        except (ProcessLookupError, PermissionError):
+            pass
+    if killed:
+        time.sleep(2)  # let MPS pool reclaim memory
+    return killed

@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _dotenv_init import init_env_then_reexec
+from _dotenv_init import init_env_then_reexec, kill_stale_python
 init_env_then_reexec(__file__)
 
 import warnings
@@ -377,38 +377,20 @@ def phase1_generate(listen_ckpts: list[Path], out_dir: Path, device: str,
     Memory pressure from Whisper/ECAPA/DNSMOS would push MPS into NaN territory
     on long phrases — load them only after F5-TTS is unloaded.
 
+    Resume-safe: existing WAVs on disk are reused. Manifest is written
+    incrementally after each gen, so a mid-run crash loses at most one clip.
+    If everything is already on disk, F5-TTS is never loaded.
+
     Returns manifest: list of {label, step, slug, prompt, wav_path}
     """
     import gc
-    print("\n=== PHASE 1: Generation (F5-TTS only) ===")
-    from f5_tts.api import F5TTS
-    print(f"Loading F5TTS_v1_Base on {device}...")
-    tts = F5TTS(model="F5TTS_v1_Base", device=device)
+    import json
 
-    manifest = []
-
-    def _gen_all(label: str, step: int):
-        for slug, prompt in EVAL_PHRASES:
-            wav_np, sr = gen_with_retry(tts, prompt)
-            wav_path = out_dir / f"{label}_{slug}.wav"
-            if wav_np is None:
-                print(f"  {label}/{slug}: GENERATION FAILED")
-                manifest.append({"label": label, "step": step, "slug": slug,
-                                 "prompt": prompt, "wav_path": "", "sr": 0})
-                continue
-            sf.write(str(wav_path), wav_np, sr)
-            print(f"  saved → {wav_path.name}  ({len(wav_np)/sr:.1f}s)")
-            manifest.append({"label": label, "step": step, "slug": slug,
-                             "prompt": prompt, "wav_path": str(wav_path), "sr": int(sr)})
-
+    # Build the full config plan: (label, step) for baseline + each checkpoint
+    configs: list[tuple[str, int]] = []
     if not skip_baseline:
-        print("\n--- Baseline (zero-shot) ---")
-        _gen_all("baseline", 0)
-
+        configs.append(("baseline", 0))
     for ckpt in listen_ckpts:
-        print(f"\n--- {ckpt.name} ---")
-        n_loaded = apply_checkpoint(tts, ckpt)
-        print(f"  applied {n_loaded} tensors")
         step_num = 0
         if ckpt.name.startswith("step_"):
             step_num = int(ckpt.stem.split("_")[1])
@@ -417,7 +399,74 @@ def phase1_generate(listen_ckpts: list[Path], out_dir: Path, device: str,
                 step_num = torch.load(str(ckpt), map_location="cpu", weights_only=False)["step"]
             except Exception:
                 step_num = -1
-        _gen_all(ckpt.stem, step_num)
+        configs.append((ckpt.stem, step_num))
+
+    # Scan disk for already-generated WAVs (source of truth — manifest may be stale)
+    manifest: list[dict] = []
+    for label, step in configs:
+        for slug, prompt in EVAL_PHRASES:
+            wav_path = out_dir / f"{label}_{slug}.wav"
+            if not wav_path.exists():
+                continue
+            try:
+                info = sf.info(str(wav_path))
+                manifest.append({"label": label, "step": step, "slug": slug,
+                                 "prompt": prompt, "wav_path": str(wav_path),
+                                 "sr": int(info.samplerate)})
+            except Exception:
+                pass  # corrupted file → leave out so we regenerate
+
+    done_keys = {(e["label"], e["slug"]) for e in manifest}
+    manifest_path = out_dir / "manifest.json"
+
+    def _persist():
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+
+    # Work list, preserving config order (baseline first, then checkpoints in order)
+    todo = [(label, step, slug, prompt)
+            for (label, step) in configs
+            for (slug, prompt) in EVAL_PHRASES
+            if (label, slug) not in done_keys]
+
+    if manifest:
+        print(f"\n=== PHASE 1: Resume — {len(manifest)} WAVs on disk, {len(todo)} remaining ===")
+    else:
+        print(f"\n=== PHASE 1: Generation (F5-TTS only, {len(todo)} clips) ===")
+    _persist()  # write initial manifest so phase 2 can see what's already done
+
+    if not todo:
+        print("  All WAVs already exist — skipping F5-TTS load")
+        return manifest
+
+    from f5_tts.api import F5TTS
+    print(f"Loading F5TTS_v1_Base on {device}...")
+    tts = F5TTS(model="F5TTS_v1_Base", device=device)
+
+    current_label = None
+    for label, step, slug, prompt in todo:
+        if label != current_label:
+            if label == "baseline":
+                print(f"\n--- Baseline (zero-shot) ---")
+            else:
+                ckpt = next(c for c in listen_ckpts if c.stem == label)
+                print(f"\n--- {ckpt.name} ---")
+                n_loaded = apply_checkpoint(tts, ckpt)
+                print(f"  applied {n_loaded} tensors")
+            current_label = label
+
+        wav_np, sr = gen_with_retry(tts, prompt)
+        wav_path = out_dir / f"{label}_{slug}.wav"
+        if wav_np is None:
+            print(f"  {label}/{slug}: GENERATION FAILED")
+            manifest.append({"label": label, "step": step, "slug": slug,
+                             "prompt": prompt, "wav_path": "", "sr": 0})
+            _persist()
+            continue
+        sf.write(str(wav_path), wav_np, sr)
+        print(f"  saved → {wav_path.name}  ({len(wav_np)/sr:.1f}s)")
+        manifest.append({"label": label, "step": step, "slug": slug,
+                         "prompt": prompt, "wav_path": str(wav_path), "sr": int(sr)})
+        _persist()
 
     # Drop F5-TTS before phase 2
     del tts
@@ -581,6 +630,12 @@ def main():
     parser.add_argument("--centroid-n", type=int, default=10,
                         help="Number of clips to average into the identity centroid (default 10)")
     args = parser.parse_args()
+
+    # Free MPS memory by killing any stale F5-TTS / eval procs from prior runs.
+    # CLAUDE.md notes that 3 stale F5-TTS procs ≈ 21 GB → OOM on 18 GB M3 Pro.
+    n_killed = kill_stale_python()
+    if n_killed:
+        print(f"Pre-launch: killed {n_killed} stale F5-TTS/eval process(es)")
 
     # Set module-level knobs before phase1_generate / phase2_score use them
     global _CFG_STRENGTH, _NFE_STEP, _SEED, _FIRST_N, _CENTROID_DIR, _CENTROID_N

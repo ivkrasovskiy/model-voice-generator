@@ -47,7 +47,7 @@ from collections import deque
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _dotenv_init import init_env_then_reexec
+from _dotenv_init import init_env_then_reexec, kill_stale_python
 init_env_then_reexec(__file__)
 
 import warnings
@@ -435,6 +435,8 @@ def train(args):
     nan_count = 0
     best_rolling_loss = float("inf")
     best_at_step = 0
+    best_eval_loss = float("inf")
+    best_eval_step = 0
     stop_reason = "max_steps"
     optimizer.zero_grad()
 
@@ -530,6 +532,21 @@ def train(args):
                 print(f"  [eval_loss step {step}] eval={eval_loss:.4f}  train_r100={rolling_mean:.4f}  "
                       f"gap={gap:+.4f}{gap_flag}")
 
+                # Auto-save the best eval-loss checkpoint — otherwise the global minimum
+                # falls between save_every saves and is lost (happened on the 8blk run:
+                # best eval @ step ~1600, but saves were at 1500 / 2000).
+                if np.isfinite(eval_loss) and eval_loss < best_eval_loss:
+                    best_eval_loss = eval_loss
+                    best_eval_step = step
+                    best_path = save_partial_checkpoint(cfm, run_dir, step, name="best.pt")
+                    writer.add_scalar("loss/best_eval", best_eval_loss, step)
+                    events_file.write(json.dumps({
+                        "step": step, "event": "best_eval",
+                        "eval_loss": eval_loss, "saved": str(best_path.name),
+                    }) + "\n")
+                    events_file.flush()
+                    print(f"    → new best eval={best_eval_loss:.4f}; saved {best_path.name}")
+
             # Audio eval hook (separate, broken on raw weights — kept off by default)
             if args.eval_every > 0 and step % args.eval_every == 0:
                 run_eval(cfm, vocoder, voice_encoder, ref_emb, device,
@@ -588,6 +605,8 @@ def train(args):
         print(f"  last 10 steps avg:  {last:.4f}")
         print(f"  delta: {delta:+.4f}  → {verdict}")
         print(f"  best rolling100:    {best_rolling_loss:.4f} @ step {best_at_step}")
+        print(f"  best eval_loss:     {best_eval_loss:.4f} @ step {best_eval_step}  "
+              f"({'saved as best.pt' if best_eval_step > 0 else 'no eval taken'})")
         print(f"  spikes: {spike_count}  NaN: {nan_count}")
 
     writer.close()
@@ -614,6 +633,13 @@ def main():
     parser.add_argument("--early-stop-threshold", type=float, default=0.01,
                         help="Minimum relative improvement to reset the early-stop clock")
     args = parser.parse_args()
+
+    # Free MPS memory by killing any stale F5-TTS / eval procs from prior runs.
+    # CLAUDE.md notes that 3 stale F5-TTS procs ≈ 21 GB → OOM on 18 GB M3 Pro.
+    n_killed = kill_stale_python()
+    if n_killed:
+        print(f"Pre-launch: killed {n_killed} stale F5-TTS/eval process(es)")
+
     train(args)
 
 
