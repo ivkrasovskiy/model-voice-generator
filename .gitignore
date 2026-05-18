@@ -1,5 +1,7 @@
 .venv/
-.venv-f5/
+.venv_openvoice
+openvoice_checkpoints
+processed
 raw_cumberbatch_data/
 dataset/
 tts_output/

@@ -46,6 +46,9 @@ _SEED = 42           # F5-TTS infer seed — fixed for reproducibility across ru
 _FIRST_N = None      # if set, run only the first N phrases (subset early-stop)
 _CENTROID_DIR: Path | None = None  # if set, compute "Cumberbatch identity centroid" from N random WAVs here
 _CENTROID_N = 10     # number of clips averaged into the centroid
+_SPEED_FIX = False         # if True, apply speed=0.3 for segments < 10 bytes (F5-TTS Issue #1155)
+_SELECTIVE_CFG: float | None = None  # if set, selective CFG threshold t (arXiv 2509.19668)
+PHRASE_SOURCES: dict[str, str] = {}  # slug -> source label, populated when --phrases-csv has source column
 
 # Six eval phrases, all ≤ 80 chars (F5-TTS single-batch limit → no compounding NaN).
 # Each targets a different axis of voice identity / generalization:
@@ -185,11 +188,16 @@ def _gen_segment_with_retry(tts, segment: str, max_retries: int = 5):
     Each retry uses seed + attempt to vary the noise — same config still produces the
     same first-attempt waveform, so runs are reproducible.
     """
+    speed = 0.3 if _SPEED_FIX and len(segment.encode("utf-8")) < 10 else 1.0
+    if speed != 1.0:
+        print(f"      speed-fix: len={len(segment.encode('utf-8'))} bytes → speed={speed}")
     for attempt in range(1, max_retries + 1):
         wav, sr, _ = tts.infer(
             ref_file=str(REF_AUDIO), ref_text=REF_TEXT, gen_text=segment,
             cfg_strength=_CFG_STRENGTH, nfe_step=_NFE_STEP,
+            speed=speed,
             seed=_SEED + (attempt - 1),
+            selective_cfg_threshold=_SELECTIVE_CFG,
         )
         w = wav.squeeze() if hasattr(wav, "squeeze") else wav
         w = np.asarray(w, dtype=np.float32)
@@ -566,9 +574,14 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
         agg_rows.append(a)
     agg_rows.sort(key=lambda r: r["step"])
 
+    # Annotate rows with source (if --phrases-csv had a source column)
+    if PHRASE_SOURCES:
+        for row in per_clip:
+            row["source"] = PHRASE_SOURCES.get(row.get("slug", ""), "")
+
     # Write CSVs
     detail_csv = out_dir / "scores_detail.csv"
-    detail_fields = ["label", "step", "slug", "prompt", "wer", "ecapa_sim",
+    detail_fields = ["label", "step", "slug", "source", "prompt", "wer", "ecapa_sim",
                      "ecapa_centroid_sim",
                      "dnsmos_sig", "dnsmos_bak", "dnsmos_ovr", "transcript", "wav_path"]
     with detail_csv.open("w", newline="") as f:
@@ -629,6 +642,16 @@ def main():
                              "(e.g. data/cumberbatch_casanova). Defaults to single-ref ECAPA only.")
     parser.add_argument("--centroid-n", type=int, default=10,
                         help="Number of clips to average into the identity centroid (default 10)")
+    parser.add_argument("--speed-fix", action="store_true",
+                        help="Apply speed=0.3 for segments < 10 bytes (F5-TTS Issue #1155 short-text fix)")
+    parser.add_argument("--selective-cfg", action="store_true",
+                        help="Enable selective CFG (arXiv 2509.19668): standard CFG for t<=threshold, "
+                             "text-conditioned CFG thereafter to amplify speaker identity")
+    parser.add_argument("--t-threshold", type=float, default=0.08,
+                        help="Timestep threshold for selective CFG (default 0.08, ~first 9 steps with sway sampling)")
+    parser.add_argument("--phrases-csv", default=None,
+                        help="Override built-in 6 eval phrases with a CSV (slug,prompt[,source]). "
+                             "Optional source column groups detail rows for cross-register comparison.")
     args = parser.parse_args()
 
     # Free MPS memory by killing any stale F5-TTS / eval procs from prior runs.
@@ -638,14 +661,17 @@ def main():
         print(f"Pre-launch: killed {n_killed} stale F5-TTS/eval process(es)")
 
     # Set module-level knobs before phase1_generate / phase2_score use them
-    global _CFG_STRENGTH, _NFE_STEP, _SEED, _FIRST_N, _CENTROID_DIR, _CENTROID_N
+    global _CFG_STRENGTH, _NFE_STEP, _SEED, _FIRST_N, _CENTROID_DIR, _CENTROID_N, _SPEED_FIX, _SELECTIVE_CFG
     _CFG_STRENGTH = args.cfg_strength
     _NFE_STEP = args.nfe_step
     _SEED = args.seed
     _FIRST_N = args.first_n
     _CENTROID_DIR = (PROJECT_ROOT / args.centroid_dir).resolve() if args.centroid_dir else None
     _CENTROID_N = args.centroid_n
-    print(f"Inference knobs: cfg_strength={_CFG_STRENGTH}, nfe_step={_NFE_STEP}, seed={_SEED}")
+    _SPEED_FIX = args.speed_fix
+    _SELECTIVE_CFG = args.t_threshold if args.selective_cfg else None
+    print(f"Inference knobs: cfg_strength={_CFG_STRENGTH}, nfe_step={_NFE_STEP}, seed={_SEED}, "
+          f"speed_fix={_SPEED_FIX}, selective_cfg={_SELECTIVE_CFG}")
     if _FIRST_N is not None:
         print(f"Subset mode: first-{_FIRST_N} phrases only")
     if _CENTROID_DIR is not None:
@@ -675,6 +701,21 @@ def main():
 
     # Filter phrases if requested
     global EVAL_PHRASES
+    if args.phrases_csv:
+        loaded = []
+        global PHRASE_SOURCES
+        PHRASE_SOURCES = {}
+        with open(args.phrases_csv) as f:
+            for row in csv.DictReader(f):
+                loaded.append((row["slug"], row["prompt"]))
+                if "source" in row and row["source"]:
+                    PHRASE_SOURCES[row["slug"]] = row["source"]
+        EVAL_PHRASES = loaded
+        print(f"Loaded {len(EVAL_PHRASES)} phrases from {args.phrases_csv}")
+        if PHRASE_SOURCES:
+            from collections import Counter
+            counts = Counter(PHRASE_SOURCES.values())
+            print(f"  by source: {dict(counts)}")
     if args.only_slug:
         EVAL_PHRASES = [(s, p) for s, p in EVAL_PHRASES if s == args.only_slug]
         if not EVAL_PHRASES:

@@ -56,6 +56,7 @@ warnings.filterwarnings("ignore")
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_BASE = PROJECT_ROOT / "data"
@@ -136,6 +137,21 @@ def load_pretrained_f5tts(device: str):
 
     cfm = cfm.to(device)
     return cfm, target_sample_rate, vocab_char_map
+
+
+def load_teacher(device: str):
+    """Load a frozen copy of the pretrained F5TTS to use as KD teacher.
+
+    The teacher is loaded onto the same device but never updated. Its velocity
+    predictions anchor the student and prevent identity drift during fine-tuning.
+    """
+    teacher, _, _ = load_pretrained_f5tts(device)
+    teacher.eval()
+    for p in teacher.parameters():
+        p.requires_grad = False
+    n = sum(p.numel() for p in teacher.parameters()) / 1e6
+    print(f"Teacher loaded and frozen: {n:.1f}M params")
+    return teacher
 
 
 def freeze_model_except_last_n(cfm, train_last_n: int):
@@ -367,6 +383,12 @@ def train(args):
     cfm, sample_rate, vocab_char_map = load_pretrained_f5tts(device)
     freeze_model_except_last_n(cfm, args.train_last_n)
 
+    teacher = None
+    if args.kd_lambda > 0:
+        print(f"\nKD mode: λ={args.kd_lambda} — loading frozen teacher...")
+        teacher = load_teacher(device)
+        from f5_tts.model.utils import list_str_to_idx
+
     all_entries = load_dataset_entries(args.dataset)
     if len(all_entries) < 10:
         raise RuntimeError(f"Too few entries: {len(all_entries)}")
@@ -424,7 +446,7 @@ def train(args):
     print(f"  max_steps={args.max_steps}  lr={args.lr}  accum={args.grad_accum}")
     print(f"  eval_every={args.eval_every}  save_every={args.save_every}")
     print(f"  early_stop: window={args.early_stop_window} threshold={args.early_stop_threshold}")
-    print(f"  device={device}  entries={len(entries)}")
+    print(f"  kd_lambda={args.kd_lambda}  device={device}  entries={len(entries)}")
 
     start = time.time()
     step = 0
@@ -458,7 +480,33 @@ def train(args):
 
             mel_lengths = torch.tensor([mel.shape[1]], device=device)
             outputs = cfm(mel, text=[entry["text"]], lens=mel_lengths)
-            loss = outputs[0] if isinstance(outputs, tuple) else outputs
+            cfm_loss = outputs[0] if isinstance(outputs, tuple) else outputs
+
+            kd_loss_val = 0.0
+            if teacher is not None:
+                # KD: fresh (x0, time, phi) — anchor student velocity to frozen teacher.
+                # Uses full audio conditioning (cond=x1) to directly regularise the
+                # conditioned predictions that drive speaker identity at inference.
+                with torch.no_grad():
+                    x1 = mel  # [1, T, 100] — clean mel, no grad
+                    x0 = torch.randn_like(x1)
+                    kd_time = torch.rand((1,), dtype=x1.dtype, device=device)
+                    t_e = kd_time.unsqueeze(-1).unsqueeze(-1)
+                    phi = (1 - t_e) * x0 + t_e * x1
+                    kd_mask = torch.ones(1, mel.shape[1], dtype=torch.bool, device=device)
+                    kd_text = list_str_to_idx([entry["text"]], cfm.vocab_char_map).to(device)
+                    pred_teacher = teacher.transformer(
+                        x=phi, cond=x1, text=kd_text, time=kd_time, mask=kd_mask,
+                    )
+
+                pred_student = cfm.transformer(
+                    x=phi, cond=x1, text=kd_text, time=kd_time, mask=kd_mask,
+                )
+                kd_loss = F.mse_loss(pred_student, pred_teacher.detach())
+                kd_loss_val = kd_loss.item()
+                loss = cfm_loss + args.kd_lambda * kd_loss
+            else:
+                loss = cfm_loss
 
             if not loss.requires_grad:
                 print(f"  step {step}: loss has no grad — freeze misconfigured")
@@ -498,6 +546,9 @@ def train(args):
             # TB scalars every step (cheap)
             writer.add_scalar("loss/step", loss_val, step)
             writer.add_scalar("loss/rolling100", rolling_mean, step)
+            if teacher is not None:
+                writer.add_scalar("loss/cfm", float(cfm_loss.item()), step)
+                writer.add_scalar("loss/kd", kd_loss_val, step)
             if grad_norm > 0:
                 writer.add_scalar("grad/norm_pre_clip", grad_norm, step)
             writer.add_scalar("progress/eta_min", eta_sec / 60, step)
@@ -506,14 +557,15 @@ def train(args):
             # JSONL event
             events_file.write(json.dumps({
                 "step": step, "loss": loss_val, "rolling100": rolling_mean,
-                "grad_norm": grad_norm, "elapsed_sec": elapsed,
-                "eta_min": eta_sec / 60,
+                "kd_loss": kd_loss_val, "grad_norm": grad_norm,
+                "elapsed_sec": elapsed, "eta_min": eta_sec / 60,
             }) + "\n")
             events_file.flush()
 
             if step % 5 == 0 or step == 1:
+                kd_str = f"  kd={kd_loss_val:.4f}" if teacher is not None else ""
                 print(f"  step {step:5d}/{args.max_steps}  loss={loss_val:.4f}  "
-                      f"r100={rolling_mean:.4f}  gn={grad_norm:.3f}  "
+                      f"r100={rolling_mean:.4f}  gn={grad_norm:.3f}{kd_str}  "
                       f"elapsed={elapsed:.0f}s  eta={eta_sec/60:.1f}m")
                 log_writer.writerow([step, f"{loss_val:.6f}", f"{grad_norm:.4f}", f"{elapsed:.2f}"])
                 log_file.flush()
@@ -632,6 +684,9 @@ def main():
                         help="If rolling100 loss has not improved in this many steps, stop")
     parser.add_argument("--early-stop-threshold", type=float, default=0.01,
                         help="Minimum relative improvement to reset the early-stop clock")
+    parser.add_argument("--kd-lambda", type=float, default=0.0,
+                        help="Knowledge distillation weight: λ × L2(student_vel, teacher_vel) "
+                             "added to CFM loss. 0 = disabled. Try 0.2, 0.5, 1.0.")
     args = parser.parse_args()
 
     # Free MPS memory by killing any stale F5-TTS / eval procs from prior runs.
