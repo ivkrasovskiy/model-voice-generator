@@ -31,6 +31,7 @@ from pathlib import Path
 # Fix PYTHONHASHSEED from .env BEFORE F5-TTS imports (uv-venv quirk crashes subprocesses)
 sys.path.insert(0, str(Path(__file__).parent))
 from _dotenv_init import init_env_then_reexec
+
 init_env_then_reexec(__file__)
 
 warnings.filterwarnings("ignore")
@@ -66,7 +67,7 @@ def main():
     tts = F5TTS(model=args.model, device=device)
 
     if args.texts_file:
-        texts = [l.strip() for l in Path(args.texts_file).read_text().splitlines() if l.strip()]
+        texts = [ln.strip() for ln in Path(args.texts_file).read_text().splitlines() if ln.strip()]
         Path(args.out_dir).mkdir(parents=True, exist_ok=True)
         for i, text in enumerate(texts):
             out = Path(args.out_dir) / f"f5_{i+1:03d}.wav"

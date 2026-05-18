@@ -24,15 +24,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _dotenv_init import init_env_then_reexec
+
 init_env_then_reexec(__file__)
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 import numpy as np
-
 from lib.dataset import load_metadata
-from lib.identity import load_ecapa, embed_file, cosine, robust_centroid
+from lib.identity import cosine, embed_file, load_ecapa, robust_centroid
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -72,7 +73,7 @@ def main():
     print(f"  centroid norm={np.linalg.norm(centroid):.3f}")
 
     sims = np.array([cosine(centroid, e) for e in embs])
-    print(f"\nSimilarity distribution:")
+    print("\nSimilarity distribution:")
     print(f"  min:    {sims.min():.4f}")
     print(f"  p10:    {np.quantile(sims, 0.10):.4f}")
     print(f"  p25:    {np.quantile(sims, 0.25):.4f}")
@@ -84,7 +85,7 @@ def main():
     very_low = sims < 0.50
     low = (sims >= 0.50) & (sims < 0.65)
     normal = sims >= 0.65
-    print(f"\nBins (threshold suggestions):")
+    print("\nBins (threshold suggestions):")
     print(f"  very-low (<0.50): {very_low.sum():4d} clips ({very_low.mean()*100:.1f}%) — likely DROP")
     print(f"  low (0.50-0.65):  {low.sum():4d} clips ({low.mean()*100:.1f}%) — REVIEW (character voice/noise)")
     print(f"  normal (>=0.65):  {normal.sum():4d} clips ({normal.mean()*100:.1f}%) — keep")
@@ -107,7 +108,7 @@ def main():
                         f"{sim:.4f}", bin_name, e["text"][:120]])
     print(f"✓ audit CSV → {audit_csv}")
 
-    print(f"\n=== Worst 15 clips (lowest ECAPA sim to dataset centroid) ===")
+    print("\n=== Worst 15 clips (lowest ECAPA sim to dataset centroid) ===")
     print(f"{'idx':>5}  {'sim':>7}  {'dur':>5}  {'file':>14}  text...")
     for i in order[:15]:
         e = valid_entries[i]

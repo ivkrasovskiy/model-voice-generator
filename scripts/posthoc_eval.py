@@ -15,25 +15,29 @@ Usage:
 
 import argparse
 import csv
-import re
 import sys
-import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _dotenv_init import init_env_then_reexec, kill_stale_python
+
 init_env_then_reexec(__file__)
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 import numpy as np
-import torch
 import soundfile as sf
+import torch
+from lib.identity import cosine, load_ecapa
+from lib.identity import embed_wav as compute_ecapa_emb
+from lib.inference import mps_reset as _mps_reset
+from lib.inference import split_to_short_segments
+from lib.metrics import compute_dnsmos, compute_wer, load_dnsmos
+from lib.transcribe import load_whisper
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DNSMOS_CACHE_DIR = Path.home() / ".cache" / "dnsmos"
-DNSMOS_URL = "https://raw.githubusercontent.com/microsoft/DNS-Challenge/master/DNSMOS/DNSMOS/sig_bak_ovr.onnx"
 
 REF_AUDIO = PROJECT_ROOT / "tts_output/ref_narrator.wav"
 REF_TEXT = "this an ideal opportunity for obtaining from her everything I wished."
@@ -48,7 +52,10 @@ _CENTROID_DIR: Path | None = None  # if set, compute "Cumberbatch identity centr
 _CENTROID_N = 10     # number of clips averaged into the centroid
 _SPEED_FIX = False         # if True, apply speed=0.3 for segments < 10 bytes (F5-TTS Issue #1155)
 _SELECTIVE_CFG: float | None = None  # if set, selective CFG threshold t (arXiv 2509.19668)
-PHRASE_SOURCES: dict[str, str] = {}  # slug -> source label, populated when --phrases-csv has source column
+PHRASE_SOURCES: dict[str, str] = {}      # slug -> source label
+PHRASE_REAL_AUDIO: dict[str, str] = {}  # slug -> path to the real recorded clip for that phrase
+                                         # when set, ECAPA is computed against this clip instead of
+                                         # the fixed ref_narrator.wav embedding
 
 # Six eval phrases, all ≤ 80 chars (F5-TTS single-batch limit → no compounding NaN).
 # Each targets a different axis of voice identity / generalization:
@@ -74,9 +81,10 @@ EVAL_PHRASES = [
 ]
 
 
-# ---------- model loaders ----------
+# ---------- posthoc-specific helpers ----------
 
 def apply_checkpoint(tts, ckpt_path: Path) -> int:
+    """Load a partial fine-tune checkpoint into tts.ema_model.transformer."""
     checkpoint = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
     sd = checkpoint["model"]
     model = tts.ema_model.transformer
@@ -91,103 +99,8 @@ def apply_checkpoint(tts, ckpt_path: Path) -> int:
     return n_loaded
 
 
-def load_whisper(device: str = "cpu"):
-    import whisper
-    print(f"Loading Whisper large-v3 on {device}...")
-    return whisper.load_model("large-v3", device=device)
-
-
-def load_ecapa(device: str = "cpu"):
-    from speechbrain.inference.speaker import EncoderClassifier
-    print(f"Loading ECAPA-TDNN (speechbrain/spkrec-ecapa-voxceleb) on {device}...")
-    savedir = Path.home() / ".cache" / "speechbrain-ecapa"
-    savedir.mkdir(parents=True, exist_ok=True)
-    return EncoderClassifier.from_hparams(
-        source="speechbrain/spkrec-ecapa-voxceleb",
-        savedir=str(savedir),
-        run_opts={"device": device},
-    )
-
-
-def load_dnsmos():
-    import onnxruntime as ort
-    DNSMOS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    model_path = DNSMOS_CACHE_DIR / "sig_bak_ovr.onnx"
-    if not model_path.exists():
-        print(f"Downloading DNSMOS ONNX → {model_path}")
-        urllib.request.urlretrieve(DNSMOS_URL, str(model_path))
-    print(f"Loading DNSMOS ONNX (sig_bak_ovr) on CPU...")
-    return ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
-
-
-# ---------- metric computations ----------
-
-def split_to_short_segments(text: str, max_chars: int = 50) -> list[str]:
-    """Split a phrase into ≤max_chars segments, preferring sentence/clause boundaries.
-
-    Why: F5-TTS auto-chunks any phrase longer than ~58 chars (depending on ref-audio
-    duration), and each chunk independently has 30-50% NaN rate on MPS. Multi-batch
-    phrases compound to ~5% per-attempt success. By pre-splitting to ≤50 chars and
-    calling F5-TTS separately per segment with its own retry, each gen is single-batch
-    and retries actually help.
-    """
-    # First pass: split on sentence-ending punctuation
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    segments: list[str] = []
-    for s in sentences:
-        s = s.strip()
-        if not s:
-            continue
-        if len(s) <= max_chars:
-            segments.append(s)
-            continue
-        # Sentence too long — split on clause boundaries (; : ,)
-        parts = re.split(r"(?<=[,;:])\s+", s)
-        buf = ""
-        for p in parts:
-            p = p.strip()
-            if not p:
-                continue
-            joined = (buf + " " + p).strip() if buf else p
-            if len(joined) <= max_chars:
-                buf = joined
-            else:
-                if buf:
-                    segments.append(buf)
-                if len(p) <= max_chars:
-                    buf = p
-                else:
-                    # Clause too long — split on word boundaries
-                    words = p.split()
-                    buf2 = ""
-                    for w in words:
-                        joined2 = (buf2 + " " + w).strip() if buf2 else w
-                        if len(joined2) <= max_chars:
-                            buf2 = joined2
-                        else:
-                            if buf2:
-                                segments.append(buf2)
-                            buf2 = w
-                    buf = buf2
-        if buf:
-            segments.append(buf)
-    return segments
-
-
-def _mps_reset():
-    """Flush MPS memory pool to prevent fragmentation-induced NaN across segments."""
-    import gc
-    gc.collect()
-    if torch.backends.mps.is_available():
-        torch.mps.empty_cache()
-
-
 def _gen_segment_with_retry(tts, segment: str, max_retries: int = 5):
-    """Generate a single ≤50-char segment with retry. Returns (wav_np, sr) or (None, None).
-
-    Each retry uses seed + attempt to vary the noise — same config still produces the
-    same first-attempt waveform, so runs are reproducible.
-    """
+    """Single-segment generation reading module-level inference knobs."""
     speed = 0.3 if _SPEED_FIX and len(segment.encode("utf-8")) < 10 else 1.0
     if speed != 1.0:
         print(f"      speed-fix: len={len(segment.encode('utf-8'))} bytes → speed={speed}")
@@ -199,11 +112,10 @@ def _gen_segment_with_retry(tts, segment: str, max_retries: int = 5):
             seed=_SEED + (attempt - 1),
             selective_cfg_threshold=_SELECTIVE_CFG,
         )
-        w = wav.squeeze() if hasattr(wav, "squeeze") else wav
-        w = np.asarray(w, dtype=np.float32)
+        w = np.asarray(wav.squeeze() if hasattr(wav, "squeeze") else wav, dtype=np.float32)
         finite = np.isfinite(w).all()
         peak = float(np.abs(w[np.isfinite(w)]).max()) if finite else 0.0
-        _mps_reset()  # flush MPS pool after every gen, success or fail
+        _mps_reset()
         if finite and peak > 0.01:
             return w, sr
         print(f"      attempt {attempt}: {'NaN/Inf' if not finite else f'SILENT peak={peak:.4f}'}")
@@ -211,17 +123,12 @@ def _gen_segment_with_retry(tts, segment: str, max_retries: int = 5):
 
 
 def gen_with_retry(tts, text: str, max_retries: int = 5):
-    """Generate audio for arbitrary-length text by pre-splitting to single-batch segments
-    and concatenating with 150 ms silence between them.
-
-    Returns (wav_np, sr) or (None, None) if ANY segment fails after retries.
-    """
+    """Split text → generate per-segment → concatenate with 150 ms silence."""
     segments = split_to_short_segments(text, max_chars=50)
     if len(segments) == 1:
         return _gen_segment_with_retry(tts, segments[0], max_retries=max_retries)
     print(f"    split into {len(segments)} segments (≤50 chars each)")
-    pieces = []
-    sr_out = None
+    pieces, sr_out = [], None
     for i, seg in enumerate(segments, 1):
         wav_np, sr = _gen_segment_with_retry(tts, seg, max_retries=max_retries)
         if wav_np is None:
@@ -231,88 +138,27 @@ def gen_with_retry(tts, text: str, max_retries: int = 5):
         pieces.append(wav_np)
         if sr_out is None:
             sr_out = sr
-        # Inter-segment silence (150 ms) for natural pause
         pieces.append(np.zeros(int(0.15 * sr), dtype=np.float32))
-    return np.concatenate(pieces[:-1]), sr_out  # drop trailing silence
-
-
-def _resample(wav: np.ndarray, sr: int, target_sr: int) -> np.ndarray:
-    if sr == target_sr:
-        return wav
-    import torchaudio
-    t = torch.from_numpy(wav).float().unsqueeze(0)
-    return torchaudio.functional.resample(t, sr, target_sr).squeeze(0).numpy()
-
-
-def _normalize_text(t: str) -> str:
-    """Lowercase, strip punctuation, collapse whitespace — for WER fairness."""
-    t = t.lower()
-    t = re.sub(r"[^\w\s']", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
-
-
-def compute_wer(ref_text: str, wav: np.ndarray, sr: int, whisper_model) -> float:
-    import jiwer
-    wav16 = _resample(wav, sr, 16000)
-    result = whisper_model.transcribe(wav16, language="en", fp16=False, verbose=False)
-    hyp = result["text"]
-    return float(jiwer.wer(_normalize_text(ref_text), _normalize_text(hyp))), hyp
-
-
-def compute_ecapa_emb(wav: np.ndarray, sr: int, ecapa) -> np.ndarray:
-    wav16 = _resample(wav, sr, 16000)
-    t = torch.from_numpy(wav16).float().unsqueeze(0)
-    with torch.no_grad():
-        emb = ecapa.encode_batch(t).squeeze().cpu().numpy()
-    return emb
+    return np.concatenate(pieces[:-1]), sr_out
 
 
 def compute_ref_centroid(centroid_dir: Path, n_samples: int, ecapa, seed: int) -> np.ndarray:
-    """Embed N random WAVs from centroid_dir and average → 'Cumberbatch identity centroid'.
-
-    More robust speaker target than a single ref clip: gen-vs-centroid measures
-    'how Cumberbatch-like' rather than 'how like this one clip'. Deterministic
-    via seed (same N clips picked every run).
-    """
+    """Embed N random WAVs from centroid_dir and average → speaker identity centroid."""
     import random
+
+    from lib.audio_io import read_wav_mono
+
     wav_dir = centroid_dir / "wavs" if (centroid_dir / "wavs").is_dir() else centroid_dir
     wavs = sorted(wav_dir.glob("*.wav"))
     if len(wavs) < n_samples:
         raise RuntimeError(f"Only {len(wavs)} WAVs in {wav_dir}, need {n_samples}")
-    rng = random.Random(seed)
-    picked = rng.sample(wavs, n_samples)
+    picked = random.Random(seed).sample(wavs, n_samples)
     print(f"  centroid: averaging {n_samples} ECAPA embeddings from {wav_dir.name}/")
-    embs = []
-    for p in picked:
-        w, sr = sf.read(str(p))
-        if w.ndim > 1:
-            w = w.mean(axis=1)
-        embs.append(compute_ecapa_emb(w.astype(np.float32), sr, ecapa))
+    embs = [compute_ecapa_emb(*read_wav_mono(p), ecapa) for p in picked]
     centroid = np.mean(np.stack(embs, axis=0), axis=0)
-    print(f"  centroid norm={np.linalg.norm(centroid):.3f}  (single-clip avg norm={np.mean([np.linalg.norm(e) for e in embs]):.3f})")
+    print(f"  centroid norm={np.linalg.norm(centroid):.3f}  "
+          f"(single-clip avg norm={np.mean([np.linalg.norm(e) for e in embs]):.3f})")
     return centroid
-
-
-def cosine(a, b):
-    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
-
-
-def compute_dnsmos(wav: np.ndarray, sr: int, session) -> dict:
-    """Returns dict with SIG, BAK, OVR each in [1, 5] MOS range.
-
-    Microsoft's sig_bak_ovr.onnx — read expected input length from the model itself.
-    """
-    wav16 = _resample(wav, sr, 16000)
-    expected_len = session.get_inputs()[0].shape[1]  # read from ONNX metadata
-    if len(wav16) < expected_len:
-        wav16 = np.pad(wav16, (0, expected_len - len(wav16)), mode="constant")
-    else:
-        wav16 = wav16[:expected_len]
-    inp = wav16.astype(np.float32).reshape(1, -1)
-    out = session.run(None, {session.get_inputs()[0].name: inp})
-    sig, bak, ovr = out[0][0]
-    return {"sig": float(sig), "bak": float(bak), "ovr": float(ovr)}
 
 
 # ---------- main pipeline ----------
@@ -454,7 +300,7 @@ def phase1_generate(listen_ckpts: list[Path], out_dir: Path, device: str,
     for label, step, slug, prompt in todo:
         if label != current_label:
             if label == "baseline":
-                print(f"\n--- Baseline (zero-shot) ---")
+                print("\n--- Baseline (zero-shot) ---")
             else:
                 ckpt = next(c for c in listen_ckpts if c.stem == label)
                 print(f"\n--- {ckpt.name} ---")
@@ -494,18 +340,29 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
     ecapa = load_ecapa(device="cpu")
     dnsmos_session = load_dnsmos()
 
-    # Single-ref embedding (gen-vs-the-12s-narrator-clip)
-    ref_wav, ref_sr = sf.read(str(REF_AUDIO))
-    if ref_wav.ndim > 1:
-        ref_wav = ref_wav.mean(axis=1)
-    ref_wav = ref_wav.astype(np.float32)
+    # Default ref embedding (gen-vs-the-12s-narrator-clip). Used when no per-clip
+    # real audio is available for a given phrase.
+    from lib.audio_io import read_wav_mono
+    ref_wav, ref_sr = read_wav_mono(REF_AUDIO)
     ecapa_ref_emb = compute_ecapa_emb(ref_wav, ref_sr, ecapa)
     print(f"  ECAPA ref embedding: dim={ecapa_ref_emb.shape[0]}, norm={np.linalg.norm(ecapa_ref_emb):.3f}")
 
-    # Optional multi-ref centroid (gen-vs-'Cumberbatch identity'). More robust
-    # speaker target than a single 12s clip.
+    # Pre-embed per-slug real clips (loaded from --phrases-csv ref_audio_path column).
+    # When present, ECAPA is computed against the actual Cumberbatch recording for that
+    # phrase — more honest than a fixed 12s clip or an averaged centroid.
+    per_slug_emb: dict[str, np.ndarray] = {}
+    if PHRASE_REAL_AUDIO:
+        print(f"  Pre-embedding {len(PHRASE_REAL_AUDIO)} real val clips for per-phrase ECAPA...")
+        for slug, path in PHRASE_REAL_AUDIO.items():
+            try:
+                w, sr_ = read_wav_mono(path)
+                per_slug_emb[slug] = compute_ecapa_emb(w, sr_, ecapa)
+            except Exception as e:
+                print(f"    WARN: {slug}: {e}")
+
+    # Optional centroid (legacy; disabled when per-clip real audio is provided)
     centroid_emb = None
-    if _CENTROID_DIR is not None:
+    if _CENTROID_DIR is not None and not per_slug_emb:
         centroid_emb = compute_ref_centroid(_CENTROID_DIR, _CENTROID_N, ecapa, _SEED)
 
     NAN_ROW = {"wer": np.nan, "ecapa_sim": np.nan, "ecapa_centroid_sim": np.nan,
@@ -703,19 +560,26 @@ def main():
     global EVAL_PHRASES
     if args.phrases_csv:
         loaded = []
-        global PHRASE_SOURCES
+        global PHRASE_SOURCES, PHRASE_REAL_AUDIO
         PHRASE_SOURCES = {}
+        PHRASE_REAL_AUDIO = {}
         with open(args.phrases_csv) as f:
             for row in csv.DictReader(f):
                 loaded.append((row["slug"], row["prompt"]))
                 if "source" in row and row["source"]:
                     PHRASE_SOURCES[row["slug"]] = row["source"]
+                if "ref_audio_path" in row and row["ref_audio_path"]:
+                    p = PROJECT_ROOT / row["ref_audio_path"]
+                    if p.exists():
+                        PHRASE_REAL_AUDIO[row["slug"]] = str(p)
         EVAL_PHRASES = loaded
         print(f"Loaded {len(EVAL_PHRASES)} phrases from {args.phrases_csv}")
         if PHRASE_SOURCES:
             from collections import Counter
             counts = Counter(PHRASE_SOURCES.values())
             print(f"  by source: {dict(counts)}")
+        if PHRASE_REAL_AUDIO:
+            print(f"  per-clip real audio targets: {len(PHRASE_REAL_AUDIO)} slugs")
     if args.only_slug:
         EVAL_PHRASES = [(s, p) for s, p in EVAL_PHRASES if s == args.only_slug]
         if not EVAL_PHRASES:

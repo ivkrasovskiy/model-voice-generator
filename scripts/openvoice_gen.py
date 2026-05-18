@@ -14,16 +14,15 @@ Runs in the .venv_openvoice/ environment (NOT the F5-TTS .venv/).
 
 import json
 import os
-import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
 import torch
-from openvoice.api import ToneColorConverter
-from openvoice import se_extractor
 from melo.api import TTS
+from openvoice import se_extractor
+from openvoice.api import ToneColorConverter
 
 REF_AUDIO = PROJECT_ROOT / "tts_output/ref_narrator.wav"
 CHECKPOINTS_DIR = PROJECT_ROOT / "openvoice_checkpoints" / "checkpoints_v2"
@@ -98,7 +97,7 @@ manifest_path = OUT_DIR / "manifest.json"
 manifest_path.write_text(json.dumps(manifest, indent=2))
 print(f"\n✓ {len(manifest)} clips generated → {OUT_DIR}")
 print(f"✓ manifest → {manifest_path}")
-print(f"\nNext: score with F5-TTS .venv:")
-print(f"  .venv/bin/python scripts/posthoc_eval.py \\")
-print(f"      --score-only --centroid-dir data/cumberbatch_casanova \\")
-print(f"      --out-dir tts_output/openvoice_eval")
+print("\nNext: score with F5-TTS .venv:")
+print("  .venv/bin/python scripts/posthoc_eval.py \\")
+print("      --score-only --centroid-dir data/cumberbatch_casanova \\")
+print("      --out-dir tts_output/openvoice_eval")

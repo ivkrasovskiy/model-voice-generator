@@ -27,14 +27,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _dotenv_init import init_env_then_reexec
+
 init_env_then_reexec(__file__)
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 import numpy as np
-
-from lib.identity import load_ecapa, embed_file, cosine
+from lib.identity import cosine, embed_file, load_ecapa
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -156,7 +157,7 @@ def main():
     with labels_csv.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["utt_file", "cluster", "is_narrator_cluster"])
-        for path, lab in zip(valid, best_labels):
+        for path, lab in zip(valid, best_labels, strict=True):
             w.writerow([path.name, int(lab), int(lab == best_cluster_id)])
     print(f"✓ labels → {labels_csv}")
 

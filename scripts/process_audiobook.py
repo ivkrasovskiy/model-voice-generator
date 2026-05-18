@@ -30,15 +30,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _dotenv_init import init_env_then_reexec
+
 init_env_then_reexec(__file__)
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 import numpy as np
 import soundfile as sf
 import torch
 import torchaudio
+from lib.audio_io import read_wav_mono
+from lib.identity import cosine, embed_file, load_ecapa
+from lib.transcribe import load_whisper, transcribe_file
 
 PROJECT_ROOT = Path(__file__).parent.parent
 TARGET_SR = 24000  # F5-TTS native rate
@@ -93,7 +98,7 @@ def stage_vad(chunks_dir: Path, work_dir: Path) -> Path:
         print(f"[VAD] cached: {n} utterances in {utts_dir}")
         return utts_dir
 
-    print(f"[VAD] loading silero-VAD model...")
+    print("[VAD] loading silero-VAD model...")
     model, utils = torch.hub.load(
         repo_or_dir="snakers4/silero-vad",
         model="silero_vad",
@@ -106,10 +111,7 @@ def stage_vad(chunks_dir: Path, work_dir: Path) -> Path:
     print(f"[VAD] processing {len(chunks)} chunks...")
     utt_idx = 0
     for ci, ch_path in enumerate(chunks):
-        wav, sr = sf.read(str(ch_path))
-        if wav.ndim > 1:
-            wav = wav.mean(axis=1)
-        wav = wav.astype(np.float32)
+        wav, sr = read_wav_mono(ch_path)
         # silero needs 16kHz
         wav16 = torchaudio.functional.resample(
             torch.from_numpy(wav).float().unsqueeze(0), sr, 16000
@@ -145,12 +147,7 @@ def stage_filter(utts_dir: Path, work_dir: Path, centroid_path: Path, threshold:
     filter_log = work_dir / "filter_log.csv"
 
     print(f"[FILTER] loading ECAPA + centroid from {centroid_path.name}...")
-    from speechbrain.inference.speaker import EncoderClassifier
-    ecapa = EncoderClassifier.from_hparams(
-        source="speechbrain/spkrec-ecapa-voxceleb",
-        savedir=str(Path.home() / ".cache" / "speechbrain-ecapa"),
-        run_opts={"device": "cpu"},
-    )
+    ecapa = load_ecapa(device="cpu")
     centroid = np.load(str(centroid_path))
     print(f"  centroid dim={centroid.shape}, norm={np.linalg.norm(centroid):.3f}")
 
@@ -162,28 +159,20 @@ def stage_filter(utts_dir: Path, work_dir: Path, centroid_path: Path, threshold:
         log_w = csv.writer(logf)
         log_w.writerow(["utt_file", "duration", "ecapa_sim", "kept"])
         for i, p in enumerate(utts):
-            try:
-                wav, sr = sf.read(str(p))
-                if wav.ndim > 1:
-                    wav = wav.mean(axis=1)
-                wav = wav.astype(np.float32)
-                wav16 = torchaudio.functional.resample(
-                    torch.from_numpy(wav).float().unsqueeze(0), sr, 16000
-                ).squeeze(0).unsqueeze(0)
-                with torch.no_grad():
-                    emb = ecapa.encode_batch(wav16).squeeze().cpu().numpy()
-                sim = float(np.dot(centroid, emb) /
-                            (np.linalg.norm(centroid) * np.linalg.norm(emb) + 1e-8))
-                dur = len(wav) / sr
-                kept = sim >= threshold
-                log_w.writerow([p.name, f"{dur:.2f}", f"{sim:.4f}", int(kept)])
-                if kept:
-                    rows.append({"utt_path": p, "duration": dur, "sim": sim})
-                if (i + 1) % 200 == 0:
-                    print(f"  {i+1}/{len(utts)}  kept so far: {len(rows)}")
-            except Exception as e:
-                print(f"  failed: {p.name}: {e}")
+            emb = embed_file(p, ecapa)
+            if emb is None:
+                print(f"  failed: {p.name}")
                 log_w.writerow([p.name, "", "", 0])
+                continue
+            wav, sr = read_wav_mono(p)
+            dur = len(wav) / sr
+            sim = cosine(centroid, emb)
+            kept = sim >= threshold
+            log_w.writerow([p.name, f"{dur:.2f}", f"{sim:.4f}", int(kept)])
+            if kept:
+                rows.append({"utt_path": p, "duration": dur, "sim": sim})
+            if (i + 1) % 200 == 0:
+                print(f"  {i+1}/{len(utts)}  kept so far: {len(rows)}")
 
     print(f"[FILTER] kept {len(rows)}/{len(utts)} ({len(rows)/len(utts)*100:.1f}%)  threshold={threshold}")
     print(f"[FILTER] log → {filter_log}")
@@ -203,22 +192,14 @@ def stage_transcribe(kept: list[dict], work_dir: Path) -> list[dict]:
         print(f"[TRANSCRIBE] all {len(kept)} clips already transcribed")
         return [{**r, "text": cache[r["utt_path"].name]} for r in kept]
 
-    print(f"[TRANSCRIBE] loading Whisper large-v3 on CPU...")
-    import whisper
-    whisper_model = whisper.load_model("large-v3", device="cpu")
+    print("[TRANSCRIBE] loading Whisper large-v3 on CPU...")
+    whisper_model = load_whisper(device="cpu")
 
     print(f"[TRANSCRIBE] transcribing {len(todo)} clips...")
     start = time.time()
     for i, r in enumerate(todo):
         try:
-            wav, sr = sf.read(str(r["utt_path"]))
-            if wav.ndim > 1:
-                wav = wav.mean(axis=1)
-            wav16 = torchaudio.functional.resample(
-                torch.from_numpy(wav.astype(np.float32)).float().unsqueeze(0), sr, 16000
-            ).squeeze(0).numpy()
-            result = whisper_model.transcribe(wav16, language="en", fp16=False, verbose=False)
-            cache[r["utt_path"].name] = result["text"].strip()
+            cache[r["utt_path"].name] = transcribe_file(r["utt_path"], whisper_model)
             if (i + 1) % 50 == 0:
                 rate = (i + 1) / (time.time() - start)
                 eta = (len(todo) - (i + 1)) / rate / 60

@@ -76,7 +76,6 @@ def kill_stale_python(extra_patterns: list[str] | None = None) -> int:
 
     Returns the number of processes killed.
     """
-    import re
     import signal
     import subprocess
     import time

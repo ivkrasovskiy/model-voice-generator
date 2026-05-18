@@ -25,26 +25,14 @@ import shutil
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+from lib.dataset import load_metadata
+
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def load_entries(name: str) -> list[dict]:
-    src_dir = PROJECT_ROOT / "data" / name
-    metadata = src_dir / "metadata.csv"
-    if not metadata.exists():
-        raise FileNotFoundError(metadata)
-    entries = []
-    with metadata.open() as f:
-        for row in csv.DictReader(f, delimiter="|"):
-            wav = src_dir / "wavs" / f"{row['audio_file']}.wav"
-            if wav.exists():
-                entries.append({
-                    "audio_file": row["audio_file"],
-                    "text": row["text"],
-                    "duration": float(row["duration"]),
-                    "wav": wav,
-                })
-    return entries
+    return load_metadata(name, project_root=PROJECT_ROOT)
 
 
 def main():

@@ -4,7 +4,7 @@ source audiobook datasets.
 
 Inputs are described by a sources list where each entry says:
   - source dataset name (under data/)
-  - filter rule: either "audit_min_sim X" or "cluster <work_dir>/cluster_labels.csv"
+  - filter rule: "audit_min_sim X", "cluster <cluster_csv> <utts_dir>", or "metadata"
 
 Output: data/cumberbatch_<name>/  with renumbered seg_NNNNN.wav + metadata.csv
        plus a manifest.json describing the provenance of each clip.
@@ -15,19 +15,17 @@ Usage examples:
       --out-name casanova_clean \
       --source cumberbatch_casanova audit_min_sim 0.50
 
-  # Build combined: cleaned Casanova + Sherlock narrator cluster
+  # Build combined: pre-filtered Casanova + pre-filtered Sherlock narrator
   .venv/bin/python scripts/build_clean_dataset.py \
-      --out-name combined_v1 \
-      --source cumberbatch_casanova audit_min_sim 0.50 \
-      --source cumberbatch_sherlock cluster dataset/audiobook_work/sherlock/cluster_labels.csv \
-                                     dataset/audiobook_work/sherlock/utts
+      --out-name combined_cas_sher \
+      --source cumberbatch_casanova_clean metadata \
+      --source cumberbatch_sherlock_narrator metadata
 """
 
 import argparse
 import csv
 import json
 import shutil
-import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -79,6 +77,29 @@ def add_source_audit(source_name: str, min_sim: float, all_rows: list, all_wavs:
                     "text": row["text"], "duration": float(row["duration"]),
                 })
                 n_added += 1
+    print(f"  → added {n_added} clips from {source_name}")
+
+
+def add_source_metadata(source_name: str, all_rows: list, all_wavs: dict):
+    """Add all clips from a pre-filtered dataset's metadata.csv without re-filtering."""
+    src_dir = PROJECT_ROOT / "data" / source_name
+    metadata_csv = src_dir / "metadata.csv"
+    if not metadata_csv.exists():
+        raise FileNotFoundError(f"No metadata.csv at {metadata_csv}")
+    n_added = 0
+    with metadata_csv.open() as f:
+        for row in csv.DictReader(f, delimiter="|"):
+            wav_path = src_dir / "wavs" / f"{row['audio_file']}.wav"
+            if not wav_path.exists():
+                continue
+            key = f"{source_name}__{row['audio_file']}"
+            all_wavs[key] = wav_path
+            all_rows.append({
+                "key": key, "source": source_name,
+                "original_id": row["audio_file"],
+                "text": row["text"], "duration": float(row["duration"]),
+            })
+            n_added += 1
     print(f"  → added {n_added} clips from {source_name}")
 
 
@@ -139,7 +160,8 @@ def main():
 
     for spec in args.source:
         if len(spec) < 2:
-            print(f"Bad source spec: {spec}"); continue
+            print(f"Bad source spec: {spec}")
+            continue
         source_name, rule = spec[0], spec[1]
         print(f"Source: {source_name}  rule: {rule}")
         if rule == "audit_min_sim":
@@ -151,6 +173,10 @@ def main():
                 raise ValueError(f"cluster needs <cluster_csv> <utts_dir>, got {spec}")
             add_source_cluster(source_name, Path(spec[2]).resolve(),
                                Path(spec[3]).resolve(), all_rows, all_wavs)
+        elif rule == "metadata":
+            if len(spec) != 2:
+                raise ValueError(f"metadata rule takes no extra args, got {spec}")
+            add_source_metadata(source_name, all_rows, all_wavs)
         else:
             raise ValueError(f"Unknown rule: {rule}")
         print()
@@ -190,7 +216,7 @@ def main():
     by_source = {}
     for r in all_rows:
         by_source.setdefault(r["source"], []).append(r)
-    print(f"\nBy source:")
+    print("\nBy source:")
     for src, rows in sorted(by_source.items()):
         sec = sum(r["duration"] for r in rows)
         print(f"  {src:<25}  {len(rows):5d} clips  {sec/60:>5.1f} min")

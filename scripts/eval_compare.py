@@ -111,7 +111,7 @@ def main():
     lines = []
     lines.append(f"# Eval comparison — baseline: `{baseline_label}/{baseline_row['label']}`")
     lines.append("")
-    lines.append(f"Metrics: WER ↓ (lower better), ECAPA / CENT ↑, DNSMOS ↑")
+    lines.append("Metrics: WER ↓ (lower better), ECAPA / CENT ↑, DNSMOS ↑")
     lines.append("- **ECAPA** = cosine sim of gen vs single 12s ref clip (`tts_output/ref_narrator.wav`)")
     lines.append("- **CENT** = cosine sim of gen vs *centroid* of N Cumberbatch dataset clips (more robust identity measure)")
     lines.append("")
@@ -121,7 +121,7 @@ def main():
     lines.append("")
     lines.append("| Config | n | WER | ECAPA | CENT | DNSMOS OVR | ΔECAPA | ΔWER |")
     lines.append("|---|---|---|---|---|---|---|---|")
-    for (label, d, r) in configs:
+    for (label, _d, r) in configs:
         d_ecapa = delta(r["ecapa_sim_mean"], baseline_row["ecapa_sim_mean"], "{:+.3f}")
         d_wer = delta(r["wer_mean"], baseline_row["wer_mean"], "{:+.3f}")
         lines.append(f"| `{label}` | {r['n_scored']} | "

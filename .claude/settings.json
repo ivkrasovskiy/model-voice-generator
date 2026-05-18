@@ -81,7 +81,19 @@
       "Skill(update-config)",
       "Skill(update-config:*)",
       "Bash(awk '{printf \"PID=%-6s CPU=%s%% MEM=%s%% RSS=%dMB\\\\n\", $2, $3, $4, $6/1024}')",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(mkdir -p /Users/ivkrasovskii/model-voice-generator/runs/cross_eval_models/checkpoints)",
+      "Bash(ln -sf ../../finetune_kd_sher_lam5/checkpoints/best.pt sher_lam5.pt)",
+      "Bash(ln -sf ../../finetune_kd_cas_lam5/checkpoints/best.pt cas_lam5.pt)",
+      "Bash(/bin/ps -A -o pid,rss,etime,command)",
+      "Bash(/usr/bin/awk '/scripts/posthoc_eval/ && !/awk/')",
+      "Bash(/usr/bin/grep posthoc_eval)",
+      "Bash(/usr/bin/grep -v grep)",
+      "Bash(kill 17811 17809)",
+      "Bash(/bin/ps -A -o pid,command)",
+      "Bash(/usr/bin/grep -E \"posthoc|cross_eval\")",
+      "Bash(/usr/bin/grep posthoc *)",
+      "Bash(xargs kill)"
     ],
     "additionalDirectories": [
       "/private/tmp/openvoice_src"

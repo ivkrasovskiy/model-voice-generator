@@ -40,22 +40,23 @@ Output:
 import argparse
 import csv
 import json
-import os
 import sys
 import time
 from collections import deque
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _dotenv_init import init_env_then_reexec, kill_stale_python
+
 init_env_then_reexec(__file__)
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -80,13 +81,20 @@ EVAL_PHRASES_SCORE = [
 REF_AUDIO_PATH = PROJECT_ROOT / "tts_output/ref_narrator.wav"
 REF_TEXT = "this an ideal opportunity for obtaining from her everything I wished."
 
+# Two short phrases (≤ 50 chars) used for the in-training ECAPA eval hook.
+# Chosen from the cross-eval set: short enough for single-batch F5-TTS,
+# high ECAPA ceiling on baseline (0.86, 0.87), different registers.
+ECAPA_EVAL_PHRASES = [
+    "I found all the guests around him.",         # 34 chars, Casanova
+    "That would indeed have been ingenious.",      # 38 chars, Sherlock
+]
+
 
 def load_pretrained_f5tts(device: str):
-    from f5_tts.model import DiT, CFM
-    from f5_tts.model.utils import get_tokenizer
     from cached_path import cached_path
+    from f5_tts.model import CFM, DiT
+    from f5_tts.model.utils import get_tokenizer
     from safetensors.torch import load_file
-    import f5_tts
 
     print(f"Loading F5TTS_v1_Base on {device}...")
 
@@ -184,34 +192,22 @@ def freeze_model_except_last_n(cfm, train_last_n: int):
 
 
 def load_dataset_entries(dataset_name: str) -> list[dict]:
-    data_dir = DATA_BASE / dataset_name
-    metadata_csv = data_dir / "metadata.csv"
-    if not metadata_csv.exists():
-        raise FileNotFoundError(f"No metadata.csv at {metadata_csv}")
+    from lib.dataset import load_metadata
 
-    entries = []
-    with metadata_csv.open() as f:
-        reader = csv.DictReader(f, delimiter="|")
-        for row in reader:
-            wav_path = data_dir / "wavs" / f"{row['audio_file']}.wav"
-            if wav_path.exists():
-                entries.append({
-                    "audio_path": str(wav_path),
-                    "text": row["text"],
-                    "duration": float(row["duration"]),
-                })
+    entries = load_metadata(dataset_name, project_root=PROJECT_ROOT)
+    # finetune loop expects audio_path key (str), not wav (Path)
+    for e in entries:
+        e["audio_path"] = str(e.pop("wav"))
     print(f"Dataset {dataset_name}: {len(entries)} valid entries")
     return entries
 
 
-def split_train_eval(entries: list[dict], n_eval: int, seed: int = 42) -> tuple[list[dict], list[dict]]:
-    """Deterministic train/eval split: take the first n_eval clips in shuffled order."""
-    import random
-    rng = random.Random(seed)
-    shuffled = list(entries)
-    rng.shuffle(shuffled)
-    eval_set = shuffled[:n_eval]
-    train_set = shuffled[n_eval:]
+def split_train_eval(
+    entries: list[dict], n_eval: int, seed: int = 42
+) -> tuple[list[dict], list[dict]]:
+    from lib.dataset import deterministic_split
+
+    train_set, eval_set = deterministic_split(entries, n_val=n_eval, seed=seed)
     return train_set, eval_set
 
 
@@ -248,29 +244,110 @@ def compute_eval_loss(cfm, mel_spec, eval_entries: list[dict], device: str, samp
     return float(np.mean(losses)) if losses else float("nan")
 
 
-def load_eval_machinery(device: str):
-    """Pre-load vocoder + Resemblyzer voice encoder + reference embedding.
-
-    Returns (vocoder, voice_encoder, ref_embedding) or (None, None, None) if disabled.
-    """
+def load_eval_machinery(device: str, load_resemblyzer: bool = True):
+    """Pre-load vocoder and optionally Resemblyzer voice encoder + reference embedding."""
     from f5_tts.infer.utils_infer import load_vocoder
 
     print("Loading vocoder (vocos) for in-training eval...")
     vocoder = load_vocoder(vocoder_name="vocos", device=device)
 
-    print("Loading Resemblyzer voice encoder (CPU)...")
-    from resemblyzer import VoiceEncoder, preprocess_wav
-    voice_encoder = VoiceEncoder(device="cpu", verbose=False)
-
-    ref_wav = preprocess_wav(str(REF_AUDIO_PATH))
-    ref_emb = voice_encoder.embed_utterance(ref_wav)
-    print(f"  ref embedding: shape={ref_emb.shape}, norm={np.linalg.norm(ref_emb):.3f}")
+    voice_encoder, ref_emb = None, None
+    if load_resemblyzer:
+        print("Loading Resemblyzer voice encoder (CPU)...")
+        from resemblyzer import VoiceEncoder, preprocess_wav
+        voice_encoder = VoiceEncoder(device="cpu", verbose=False)
+        ref_wav = preprocess_wav(str(REF_AUDIO_PATH))
+        ref_emb = voice_encoder.embed_utterance(ref_wav)
+        print(f"  ref embedding: shape={ref_emb.shape}, norm={np.linalg.norm(ref_emb):.3f}")
 
     return vocoder, voice_encoder, ref_emb
 
 
+def load_ecapa_machinery():
+    """Load ECAPA-TDNN and embed the reference narrator clip (CPU)."""
+    from lib.identity import embed_file, load_ecapa
+
+    print("Loading ECAPA-TDNN (CPU) for in-training identity eval...")
+    ecapa = load_ecapa(device="cpu")
+    ref_emb = embed_file(REF_AUDIO_PATH, ecapa=ecapa)
+    if ref_emb is None:
+        raise RuntimeError(f"Could not embed ref audio: {REF_AUDIO_PATH}")
+    print(f"  ECAPA ref embedding: shape={ref_emb.shape}, norm={np.linalg.norm(ref_emb):.3f}")
+    return ecapa, ref_emb
+
+
+@contextmanager
+def _ema_applied(cfm: torch.nn.Module, ema: "EMATracker"):
+    """Temporarily swap EMA shadow weights into cfm in-place, restore on exit.
+
+    Used for inference-under-EMA without saving/loading checkpoints.
+    """
+    live_weights = {
+        n: p.data.clone()
+        for n, p in cfm.named_parameters()
+        if n in ema.shadow
+    }
+    for n, p in cfm.named_parameters():
+        if n in ema.shadow:
+            p.data.copy_(ema.shadow[n].to(p.device))
+    try:
+        yield cfm
+    finally:
+        for n, p in cfm.named_parameters():
+            if n in live_weights:
+                p.data.copy_(live_weights[n])
+
+
+@torch.no_grad()
+def run_ecapa_eval(cfm, ema, ecapa_model, ref_ecapa_emb, vocoder, device, step, writer):
+    """Generate ECAPA_EVAL_PHRASES with EMA weights, log cosine vs real ref clip.
+
+    Uses EMA weights (not live) — avoids noisy mid-training identity scores.
+    No Whisper — just ECAPA cosine similarity.
+    """
+    from f5_tts.infer.utils_infer import infer_process
+    from lib.identity import cosine, embed_wav
+
+    was_training = cfm.training
+    sims = []
+
+    with _ema_applied(cfm, ema):
+        cfm.eval()
+        for phrase in ECAPA_EVAL_PHRASES:
+            wav, sr, _ = infer_process(
+                ref_audio=str(REF_AUDIO_PATH),
+                ref_text=REF_TEXT,
+                gen_text=phrase,
+                model_obj=cfm,
+                vocoder=vocoder,
+                device=device,
+                show_info=lambda *a, **k: None,
+            )
+            if wav is None:
+                continue
+            w = wav.squeeze() if hasattr(wav, "squeeze") else wav
+            w = np.asarray(w, dtype=np.float32)
+            if not np.isfinite(w).all() or float(np.abs(w).max()) < 0.01:
+                continue
+            gen_emb = embed_wav(w, int(sr), ecapa_model)
+            sims.append(cosine(ref_ecapa_emb, gen_emb))
+
+    if was_training:
+        cfm.train()
+
+    if sims:
+        mean_sim = float(np.mean(sims))
+        writer.add_scalar("eval/ecapa_ema_mean", mean_sim, step)
+        print(f"  [ecapa step {step}] ecapa_ema={mean_sim:.4f}  (n={len(sims)})")
+        return mean_sim
+    print(f"  [ecapa step {step}] ECAPA eval skipped — all phrases failed inference")
+    return None
+
+
 def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
-    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
+    from lib.identity import cosine
+
+    return cosine(a, b)
 
 
 def run_eval(
@@ -359,7 +436,8 @@ def run_eval(
             return mean_sim
     except Exception as e:
         print(f"  [eval step {step}] FAILED: {e}")
-        import traceback; traceback.print_exc()
+        import traceback
+        traceback.print_exc()
     finally:
         if was_training:
             cfm.train()
@@ -367,13 +445,58 @@ def run_eval(
     return None
 
 
-def save_partial_checkpoint(cfm, run_dir: Path, step: int, name: str | None = None):
-    keys = lambda k: "transformer_blocks" in k or "norm_out" in k or "proj_out" in k
-    sd = {k: v for k, v in cfm.state_dict().items() if keys(k)}
+def save_partial_checkpoint(
+    cfm, run_dir: Path, step: int, name: str | None = None, ema_sd: dict | None = None
+):
+    """Save only the trainable (requires_grad) weights. ~60% smaller than saving all blocks.
+
+    If ema_sd is provided, also saves ema_<name>.pt alongside — EMA weights produce
+    NaN-free audio at inference (same format, loaded by posthoc_eval.apply_checkpoint).
+    """
+    trainable_names = {n for n, p in cfm.named_parameters() if p.requires_grad}
+    sd = {k: v for k, v in cfm.state_dict().items() if k in trainable_names}
     fname = name if name else f"step_{step:06d}.pt"
     path = run_dir / "checkpoints" / fname
     torch.save({"model": sd, "step": step}, path)
+    if ema_sd is not None:
+        ema_path = run_dir / "checkpoints" / f"ema_{fname}"
+        torch.save({"model": ema_sd, "step": step}, ema_path)
     return path
+
+
+class EMATracker:
+    """Exponential moving average over a model's trainable parameters.
+
+    Kept separate from the live model so we can checkpoint raw and EMA
+    independently. EMA weights produce stable audio at inference; raw weights
+    are what the optimizer updates.
+
+    decay=0.9999 is the standard F5-TTS value; use lower (0.999) for small
+    datasets where the EMA should track faster.
+    """
+
+    def __init__(self, model: torch.nn.Module, decay: float = 0.9999):
+        self.decay = decay
+        # Shadow dict: {param_name: ema_tensor}. Only trainable params.
+        self.shadow: dict[str, torch.Tensor] = {
+            n: p.detach().clone()
+            for n, p in model.named_parameters()
+            if p.requires_grad
+        }
+
+    @torch.no_grad()
+    def update(self, model: torch.nn.Module):
+        for n, p in model.named_parameters():
+            if p.requires_grad and n in self.shadow:
+                self.shadow[n].mul_(self.decay).add_(p.detach(), alpha=1.0 - self.decay)
+
+    def state_dict(self) -> dict:
+        """Return {trainable_key: ema_tensor} in the checkpoint format expected by posthoc_eval."""
+        # posthoc_eval.apply_checkpoint reads key as "transformer.<block>.<param>"
+        # model.named_parameters already includes the full qualified name; map to
+        # the same format the live checkpoint uses (strip the top-level cfm. prefix
+        # if present — named_parameters on the CFM object already excludes it).
+        return {k: v.cpu() for k, v in self.shadow.items()}
 
 
 def train(args):
@@ -407,6 +530,9 @@ def train(args):
 
     trainable_params = [p for p in cfm.parameters() if p.requires_grad]
 
+    ema = EMATracker(cfm, decay=args.ema_decay)
+    print(f"EMA tracker initialised (decay={args.ema_decay}, {len(ema.shadow)} params)")
+
     try:
         from transformers.optimization import Adafactor
         optimizer = Adafactor(
@@ -435,17 +561,23 @@ def train(args):
     print(f"TensorBoard: tensorboard --logdir {tb_dir}")
 
     vocoder, voice_encoder, ref_emb = (None, None, None)
-    if args.eval_every > 0:
-        vocoder, voice_encoder, ref_emb = load_eval_machinery(device)
+    ecapa_model, ref_ecapa_emb = (None, None)
+    need_vocoder = args.eval_every > 0 or args.ecapa_every > 0
+    if need_vocoder:
+        vocoder, voice_encoder, ref_emb = load_eval_machinery(
+            device, load_resemblyzer=(args.eval_every > 0)
+        )
+    if args.ecapa_every > 0:
+        ecapa_model, ref_ecapa_emb = load_ecapa_machinery()
 
     cfm.train()
     rng = torch.Generator()
     rng.manual_seed(42)
 
-    print(f"\n=== Training ===")
+    print("\n=== Training ===")
     print(f"  max_steps={args.max_steps}  lr={args.lr}  accum={args.grad_accum}")
-    print(f"  eval_every={args.eval_every}  save_every={args.save_every}")
-    print(f"  early_stop: window={args.early_stop_window} threshold={args.early_stop_threshold}")
+    print(f"  eval_every={args.eval_every}  ecapa_every={args.ecapa_every}  save_every={args.save_every}")
+    print(f"  early_stop: stop if best eval_loss not beaten in {args.early_stop_window} steps")
     print(f"  kd_lambda={args.kd_lambda}  device={device}  entries={len(entries)}")
 
     start = time.time()
@@ -455,8 +587,6 @@ def train(args):
     grad_norms: deque[float] = deque(maxlen=100)
     spike_count = 0
     nan_count = 0
-    best_rolling_loss = float("inf")
-    best_at_step = 0
     best_eval_loss = float("inf")
     best_eval_step = 0
     stop_reason = "max_steps"
@@ -528,6 +658,7 @@ def train(args):
                 )
                 optimizer.step()
                 optimizer.zero_grad()
+                ema.update(cfm)
                 grad_norms.append(grad_norm)
 
             losses.append(loss_val)
@@ -598,7 +729,9 @@ def train(args):
                 if np.isfinite(eval_loss) and eval_loss < best_eval_loss:
                     best_eval_loss = eval_loss
                     best_eval_step = step
-                    best_path = save_partial_checkpoint(cfm, run_dir, step, name="best.pt")
+                    best_path = save_partial_checkpoint(
+                        cfm, run_dir, step, name="best.pt", ema_sd=ema.state_dict()
+                    )
                     writer.add_scalar("loss/best_eval", best_eval_loss, step)
                     events_file.write(json.dumps({
                         "step": step, "event": "best_eval",
@@ -606,6 +739,26 @@ def train(args):
                     }) + "\n")
                     events_file.flush()
                     print(f"    → new best eval={best_eval_loss:.4f}; saved {best_path.name}")
+
+                # Early stop: if global best eval-loss hasn't been beaten in
+                # `early_stop_window` steps, the model has plateaued/diverged.
+                # Uses *global* best (not previous-step delta), so a one-off
+                # bad eval doesn't trip the stop and a sustained drift does.
+                if best_eval_step > 0 and (step - best_eval_step) >= args.early_stop_window:
+                    print(f"\n  EARLY STOP: eval_loss has not beaten global best "
+                          f"({best_eval_loss:.4f} @ step {best_eval_step}) for "
+                          f"{step - best_eval_step} steps (window={args.early_stop_window})")
+                    stop_reason = "early_stop_eval_plateau"
+                    break
+
+            # ECAPA identity eval using EMA weights (no Whisper, 2 short phrases)
+            if args.ecapa_every > 0 and step % args.ecapa_every == 0:
+                run_ecapa_eval(cfm, ema, ecapa_model, ref_ecapa_emb,
+                               vocoder, device, step, writer)
+                if device == "mps":
+                    import gc
+                    gc.collect()
+                    torch.mps.empty_cache()
 
             # Audio eval hook (separate, broken on raw weights — kept off by default)
             if args.eval_every > 0 and step % args.eval_every == 0:
@@ -617,17 +770,10 @@ def train(args):
                 ckpt = save_partial_checkpoint(cfm, run_dir, step)
                 print(f"  saved checkpoint → {ckpt.name}")
 
-            # Early stop check: every 100 steps, look at rolling100
-            if step % 100 == 0 and step >= args.early_stop_window and len(rolling100) >= 100:
-                if rolling_mean < best_rolling_loss * (1 - args.early_stop_threshold):
-                    best_rolling_loss = rolling_mean
-                    best_at_step = step
-                if step - best_at_step >= args.early_stop_window:
-                    print(f"\n  EARLY STOP: rolling100 loss has not improved by "
-                          f"{args.early_stop_threshold*100:.1f}% in last {args.early_stop_window} steps "
-                          f"(best={best_rolling_loss:.4f} @ step {best_at_step})")
-                    stop_reason = "early_stop_plateau"
-                    break
+            # Early stop is handled inside the eval_loss block above —
+            # we stop when global-best eval_loss hasn't been beaten in
+            # `early_stop_window` steps. Tracking training-loss rolling100
+            # was misleading: it's noisy and doesn't catch divergence.
 
             # Health warnings every 250 steps
             if step % 250 == 0:
@@ -642,7 +788,8 @@ def train(args):
 
         except Exception as e:
             print(f"  step {step} failed: {e}")
-            import traceback; traceback.print_exc()
+            import traceback
+            traceback.print_exc()
             if step == 0:
                 raise
             continue
@@ -660,11 +807,10 @@ def train(args):
         last = sum(losses[-10:]) / 10
         delta = first - last
         verdict = "DECREASING ✓" if last < first else "NOT DECREASING ✗"
-        print(f"\nLoss summary:")
+        print("\nLoss summary:")
         print(f"  first 10 steps avg: {first:.4f}")
         print(f"  last 10 steps avg:  {last:.4f}")
         print(f"  delta: {delta:+.4f}  → {verdict}")
-        print(f"  best rolling100:    {best_rolling_loss:.4f} @ step {best_at_step}")
         print(f"  best eval_loss:     {best_eval_loss:.4f} @ step {best_eval_step}  "
               f"({'saved as best.pt' if best_eval_step > 0 else 'no eval taken'})")
         print(f"  spikes: {spike_count}  NaN: {nan_count}")
@@ -688,16 +834,22 @@ def main():
                         help="Compute held-out eval loss every N steps (0 = disabled)")
     parser.add_argument("--n-eval-clips", type=int, default=50,
                         help="How many clips to hold out for eval-loss computation")
-    parser.add_argument("--early-stop-window", type=int, default=500,
-                        help="If rolling100 loss has not improved in this many steps, stop")
-    parser.add_argument("--early-stop-threshold", type=float, default=0.01,
-                        help="Minimum relative improvement to reset the early-stop clock")
+    parser.add_argument("--early-stop-window", type=int, default=200,
+                        help="Stop if global-best eval_loss has not been beaten "
+                             "in this many steps. Checked at each eval_loss_every tick.")
     parser.add_argument("--kd-lambda", type=float, default=0.0,
                         help="Knowledge distillation weight: λ × L2(student_vel, teacher_vel) "
                              "added to CFM loss. 0 = disabled. Try 0.2, 0.5, 1.0.")
     parser.add_argument("--mps-cache-every", type=int, default=25,
                         help="Flush MPS allocator every N steps (KD doubles activations and "
                              "MPS doesn't auto-release). Lower = lower memory, slightly slower.")
+    parser.add_argument("--ecapa-every", type=int, default=100,
+                        help="Compute ECAPA cosine vs ref clip every N steps using EMA weights "
+                             "(0 = disabled). Loads ECAPA-TDNN on CPU; costs ~15s per eval.")
+    parser.add_argument("--ema-decay", type=float, default=0.9999,
+                        help="EMA decay for trainable parameters (0.9999 = standard F5-TTS value; "
+                             "use 0.999 for small datasets to track faster). EMA weights are saved "
+                             "as ema_best.pt alongside best.pt and produce NaN-free audio at eval.")
     args = parser.parse_args()
 
     # Free MPS memory by killing any stale F5-TTS / eval procs from prior runs.

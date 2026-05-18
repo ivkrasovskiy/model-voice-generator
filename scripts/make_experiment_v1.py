@@ -18,7 +18,6 @@ Builds three training datasets and one cross-eval set from the cleaned sources:
 import csv
 import random
 import shutil
-import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -124,7 +123,7 @@ def main():
     print(f"  casanova: {len(cas_train_pool)} train pool / {len(cas_val)} val")
     print(f"  sherlock: {len(sher_train_pool)} train pool / {len(sher_val)} val")
 
-    print(f"\n=== Building cross-eval set (eval_50.csv) ===")
+    print("\n=== Building cross-eval set (eval_50.csv) ===")
     eval_dir = PROJECT_ROOT / "tts_output" / "cross_eval_50"
     eval_dir.mkdir(parents=True, exist_ok=True)
     eval_csv = eval_dir / "eval_50.csv"
@@ -139,12 +138,12 @@ def main():
                         str(e["wav"].relative_to(PROJECT_ROOT)), f"{e['duration']:.3f}"])
     print(f"  → {eval_csv} ({len(cas_val) + len(sher_val)} clips)")
 
-    print(f"\n=== Writing Sherlock training set (354 clips) ===")
+    print("\n=== Writing Sherlock training set (354 clips) ===")
     sher_train_dir = write_dataset("cumberbatch_sherlock_train_354", sher_train_pool)
     sher_total_dur = sum(e["duration"] for e in sher_train_pool)
     print(f"  → {sher_train_dir} ({len(sher_train_pool)} clips, {sher_total_dur/60:.1f} min)")
 
-    print(f"\n=== Sampling matched Casanova training set (354 clips) ===")
+    print("\n=== Sampling matched Casanova training set (354 clips) ===")
     n_match = len(sher_train_pool)
     sher_train_durs = [e["duration"] for e in sher_train_pool]
     cas_matched = stratified_match(cas_train_pool, sher_train_durs, n_match, SEED)
@@ -157,7 +156,7 @@ def main():
         s = sorted(durs)
         return s[int(len(s) * q)]
     cas_match_durs = [e["duration"] for e in cas_matched]
-    print(f"\nDuration distribution check:")
+    print("\nDuration distribution check:")
     print(f"  {'set':<25}  {'p10':>5}  {'p50':>5}  {'p90':>5}")
     for label, ds in [
         ("sherlock_train (target)", sher_train_durs),
@@ -166,9 +165,9 @@ def main():
     ]:
         print(f"  {label:<25}  {p(ds, 0.10):>5.1f}  {p(ds, 0.50):>5.1f}  {p(ds, 0.90):>5.1f}")
 
-    print(f"\n✓ Experiment setup complete. Run training with:")
-    print(f"  finetune_f5.py --dataset cumberbatch_sherlock_train_354 ...")
-    print(f"  finetune_f5.py --dataset cumberbatch_casanova_train_354 ...")
+    print("\n✓ Experiment setup complete. Run training with:")
+    print("  finetune_f5.py --dataset cumberbatch_sherlock_train_354 ...")
+    print("  finetune_f5.py --dataset cumberbatch_casanova_train_354 ...")
 
 
 if __name__ == "__main__":

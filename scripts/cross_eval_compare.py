@@ -69,7 +69,7 @@ def main():
         sys.exit("Need same number of --labels as detail_csvs")
 
     models = []
-    for label, path in zip(args.labels, args.detail_csvs):
+    for label, path in zip(args.labels, args.detail_csvs, strict=True):
         rows = load_detail(Path(path))
         if not rows:
             sys.exit(f"No rows loaded from {path}")
@@ -98,7 +98,7 @@ def main():
         lines.append("| Model | n | WER | ECAPA | CENT | DNSMOS-OVR |")
         lines.append("|---|---|---|---|---|---|")
         for label, rows in models:
-            a = aggregate(rows, filter_fn=lambda r: r.get("source") == src)
+            a = aggregate(rows, filter_fn=lambda r, s=src: r.get("source") == s)
             lines.append(f"| `{label}` | {a['n']} | {a['wer']:.3f} ± {a['wer_std']:.2f} | "
                          f"{a['ecapa']:.4f} ± {a['ecapa_std']:.3f} | "
                          f"{a['cent']:.4f} ± {a['cent_std']:.3f} | {a['ovr']:.2f} |")
@@ -111,8 +111,8 @@ def main():
     base_rows = models[0][1]
     for label, rows in models[1:]:
         for src in sources:
-            base_a = aggregate(base_rows, filter_fn=lambda r: r.get("source") == src)
-            a = aggregate(rows, filter_fn=lambda r: r.get("source") == src)
+            base_a = aggregate(base_rows, filter_fn=lambda r, s=src: r.get("source") == s)
+            a = aggregate(rows, filter_fn=lambda r, s=src: r.get("source") == s)
             d_wer = base_a["wer"] - a["wer"]  # lower is better → positive delta = improvement
             d_ecapa = a["ecapa"] - base_a["ecapa"]
             d_cent = a["cent"] - base_a["cent"]
