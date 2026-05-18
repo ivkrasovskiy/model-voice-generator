@@ -66,7 +66,15 @@ def split_to_short_segments(text: str, max_chars: int = 50) -> list[str]:
 
 
 def mps_reset():
-    """Flush MPS memory pool to prevent fragmentation-induced NaN across segments."""
+    """Flush MPS allocator + run Python GC.
+
+    Call this between long-lived MPS operations:
+      - per generation in inference loops (NaN prevention via fragmentation reset)
+      - every N steps in training loops (high-water-mark control under KD,
+        where the per-step activation footprint doubles)
+
+    Cheap (~10 ms) but worth ~2–3 GB of working-set headroom on 18 GB Macs.
+    """
     gc.collect()
     if torch.backends.mps.is_available():
         torch.mps.empty_cache()

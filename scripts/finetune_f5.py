@@ -570,6 +570,14 @@ def train(args):
                 log_writer.writerow([step, f"{loss_val:.6f}", f"{grad_norm:.4f}", f"{elapsed:.2f}"])
                 log_file.flush()
 
+            # Release MPS allocator buffers every N steps so the high-water mark
+            # doesn't drift into swap. KD doubles per-step activation memory and
+            # this allocator does not auto-release between iterations.
+            if step % args.mps_cache_every == 0 and device == "mps":
+                import gc
+                gc.collect()
+                torch.mps.empty_cache()
+
             # Held-out eval loss (cheap, no audio gen, no NaN issue)
             if args.eval_loss_every > 0 and step % args.eval_loss_every == 0:
                 eval_loss = compute_eval_loss(cfm, mel_spec, eval_entries, device, sample_rate)
@@ -687,6 +695,9 @@ def main():
     parser.add_argument("--kd-lambda", type=float, default=0.0,
                         help="Knowledge distillation weight: λ × L2(student_vel, teacher_vel) "
                              "added to CFM loss. 0 = disabled. Try 0.2, 0.5, 1.0.")
+    parser.add_argument("--mps-cache-every", type=int, default=25,
+                        help="Flush MPS allocator every N steps (KD doubles activations and "
+                             "MPS doesn't auto-release). Lower = lower memory, slightly slower.")
     args = parser.parse_args()
 
     # Free MPS memory by killing any stale F5-TTS / eval procs from prior runs.
