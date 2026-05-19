@@ -1,5 +1,7 @@
 .venv/
 .venv_openvoice
+.venv_xtts
+.ruff_cache
 openvoice_checkpoints
 processed
 raw_cumberbatch_data/

@@ -69,40 +69,47 @@ These thresholds are baked into the early-stop + health-check logic in `finetune
 
 ## How this model compares to 2025 SOTA TTS
 
-F5-TTS (Oct 2024) is solid but no longer cutting edge. The landscape as of early 2026:
+F5-TTS (Oct 2024) is solid but no longer cutting edge. The landscape as of May 2026:
 
-| Model | License | Released | Strength | Why we picked F5-TTS instead |
+| Model | License | Released | Strength | Status here |
 |---|---|---|---|---|
-| **F5-TTS** | MIT | 2024-10 | Fast inference, MPS-compatible, permissive license, simple to fine-tune | — this is what we use |
-| **CosyVoice 2** (Alibaba) | Apache-2.0 | 2024-12 | Currently SOTA for English voice cloning quality; instruction-following | LLM-style autoregressive — much harder to fine-tune on 18 GB |
-| **GPT-SoVITS v3** | MIT | 2025-Q1 | Excellent English cloning, great for audiobooks specifically | Heavier; requires CUDA, no good MPS path |
-| **Spark-TTS** (SparkAudio) | Apache-2.0 | 2025-01 | Strong cross-lingual zero-shot; small model | Newer/less battle-tested; tooling is rough |
-| **Voicebox / Audiobox** (Meta) | research-only | 2024 | Best zero-shot quality in published benchmarks | Not open weights — can't use |
-| **Bark** (Suno) | MIT | 2023 | Expressive non-speech (laughs, sighs) | Outdated; Bark Small was deprecated 2024-Q4 |
-| **XTTS-v2** (Coqui) | CPML (non-commercial) | 2023 | Multilingual, good for non-English | Unmaintained since 2023; doesn't work on MPS (`Output channels > 65536`) |
-| **StyleTTS 2** | MIT | 2023 | Highest naturalness for trained voices | No usable zero-shot path; needs full retrain per voice |
+| **F5-TTS** | MIT | 2024-10 | MPS-compatible, simple to fine-tune | **Current best identity (ECAPA 0.83), capped WER 1.4 by ref-text leakage** |
+| **XTTS-v2** (Coqui) | CPML (non-commercial) | 2023 | Multilingual, speaker-encoder conditioning | **Tested: WER 0.11 but ECAPA 0.69. CPU works in `.venv_xtts/` after pinning `torch<2.6`, `transformers<4.44`** |
+| **IndexTTS-2** | open | 2025-09 | Audio-only ref, AR with duration control; reportedly beats F5 and CosyVoice 2 | **Proposed next trial — see [indextts_plan.md](./indextts_plan.md)** |
+| **CosyVoice 2** (Alibaba) | Apache-2.0 | 2024-12 | Supervised semantic tokens; strong English clone | Fallback if IndexTTS-2 fails |
+| **Fish Speech v1.5+** | open | 2024 | Most mature pip-install path | Fallback B |
+| **GPT-SoVITS v3** | MIT | 2025-Q1 | Excellent English cloning | CUDA-only, no good MPS path |
+| **Spark-TTS** (SparkAudio) | Apache-2.0 | 2025-01 | Cross-lingual zero-shot | Less battle-tested; tooling rough |
+| **Voicebox / Audiobox** (Meta) | research-only | 2024 | Best published benchmarks | Not open weights |
+| **Bark** (Suno) | MIT | 2023 | Expressive non-speech | Outdated |
+| **StyleTTS 2** | MIT | 2023 | Highest naturalness for trained voices | No zero-shot path; full retrain per voice |
+| **F5R-TTS** (arXiv 2504.02407) | MIT | 2025-04 | RL fine-tune of F5-TTS with WER+SIM reward | **Not feasible**: requires re-pretrain from scratch + 8× A100 — see [literature_notes.md §4](./literature_notes.md) |
 
-**Why F5-TTS for this project specifically**:
-1. **Runs on Apple MPS** at acceptable speed (~70 s per ~6 s clip on M3 Pro) — most others are CUDA-only
-2. **Permissive MIT license** — you can ship a fine-tuned voice without legal concerns
-3. **Single-speaker fine-tune fits in 18 GB** with the freezing strategy above
-4. **Stable inference API** via the `f5_tts.api.F5TTS` wrapper
+**Why F5-TTS still anchors this project**:
+1. Runs on Apple MPS at acceptable speed (~70 s per ~6 s clip on M3 Pro)
+2. Permissive MIT license
+3. Single-speaker fine-tune fits in 18 GB with the freezing strategy above
+4. Stable inference API via `f5_tts.api.F5TTS`
 
-**When to migrate off F5-TTS**:
-- If you rent a 24 GB+ GPU anyway, **CosyVoice 2** or **GPT-SoVITS v3** will give meaningfully better cloning quality on this dataset. CosyVoice 2 is the current best-in-class for English clone from a short reference.
-- If you need expressive non-speech (Cumberbatch's pauses, breath, laughs), **Bark** does this better but at lower base quality.
-- If you go multilingual, **Spark-TTS** has the best zero-shot cross-lingual transfer.
+**Why F5-TTS is no longer enough**:
+- Reference-text leakage caps WER at ~1.4 architecturally. Fine-tuning won't move it.
+- 7 fine-tune runs, all land at ECAPA 0.82-0.83. Diminishing returns confirmed empirically.
+- XTTS-v2 proved the trade-off is architectural: no-ref-text → no leakage → near-zero WER.
 
-For *this* project — single-voice audiobook narrator clone, on-laptop, with permissive license — F5-TTS is the right tool. Migrating to CosyVoice 2 would mean +1 week of pipeline work (different dataset format, different inference path) for an estimated 10–20 % improvement in subjective speaker similarity. Worth it only after you've maxed out F5-TTS with a 24 GB GPU fine-tune.
+**When to migrate off F5-TTS** (current decision tree):
+1. **First**: Try IndexTTS-2 on M3 Pro CPU per [indextts_plan.md](./indextts_plan.md). It's the only model that *might* beat F5 on identity AND XTTS on WER on this hardware.
+2. **If that fails on M3 Pro**: rent a 24 GB GPU (RunPod A5000 ≈ $0.35/hr) for IndexTTS-2 / CosyVoice 2 inference. Cheap enough to be a one-day experiment.
+3. **If no modern model can match F5-TTS on identity**: keep F5-TTS for production, accept the WER trade-off, and either (a) post-process to splice in XTTS-v2 outputs for high-stakes phrases, or (b) accept the leakage and ship.
 
 ## Practical playbook
 
-**If results from this fine-tune are good enough**: keep using F5-TTS, this script. No upgrade needed.
+**Current state**: F5-TTS fine-tuning is exhausted. Don't run more F5 fine-tune experiments without a new lever (e.g. a different architecture or a 24 GB GPU + Adam + all 22 blocks unfrozen).
 
-**If they're underwhelming** (mostly likely outcome given 18 GB + 4 blocks unfrozen):
-1. Rent a 24 GB GPU (RunPod A5000 ≈ $0.35/hr; ~$2 for an 8 K-step run)
-2. Set `--train-last-n 22` and switch Adafactor → Adam in the same script
+**To move forward**: read and execute [indextts_plan.md](./indextts_plan.md).
+
+**Legacy fine-tune playbook (kept for reference, low priority)**:
+1. Rent a 24 GB GPU
+2. Set `--train-last-n 22`, switch Adafactor → Adam
 3. Run 8 K steps with eval every 1 K
-4. Pick the checkpoint with the best Resemblyzer score (not necessarily the last one)
-
-**If F5-TTS still underwhelms after that**: migrate to CosyVoice 2.
+4. Pick checkpoint with best per-clip ECAPA (not Resemblyzer; that metric is deprecated)
+5. If F5-TTS *still* underwhelms (likely, given the architectural ceiling), move to IndexTTS-2 / CosyVoice 2.
