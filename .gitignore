@@ -2,6 +2,9 @@
 .venv_openvoice
 .venv_xtts
 .ruff_cache
+.codegraph
+.venv_indextts
+checkpoints
 openvoice_checkpoints
 processed
 raw_cumberbatch_data/
@@ -18,3 +21,4 @@ __pycache__/
 logs/
 runs/
 data/
+vendor/

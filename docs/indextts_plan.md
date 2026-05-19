@@ -1,4 +1,12 @@
-# IndexTTS-2 evaluation plan
+# IndexTTS-2 evaluation plan — STATUS: COMPLETED (2026-05-19)
+
+**Outcome**: Feasibility gate passed; full eval ran successfully. Zero-shot result on 15-phrase eval: **WER 0.037, ECAPA 0.784, DNSMOS OVR 2.90**. Voice quality verified by listening — recognizable Cumberbatch, no gibberish, intelligible.
+
+Follow-up work to push ECAPA over 0.80 is planned in **[indextts_experiments.md](./indextts_experiments.md)**.
+
+This document is kept as a record of the install/eval procedure (useful if `/tmp/index-tts/` ever needs to be rebuilt from scratch). The "Pitfalls we already hit" section at the bottom is still load-bearing for future installs.
+
+---
 
 Self-contained plan for a fresh Sonnet session to test whether IndexTTS-2 (Sept 2025) beats both F5-TTS (current identity leader) and XTTS-v2 (current WER leader) on our 15-phrase eval set.
 

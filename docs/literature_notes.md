@@ -118,45 +118,46 @@ Install gotchas to remember:
 - MPS broken; CPU works at ~2 s/phrase. Acceptable for 15-phrase eval.
 - All install via `uv pip install --python .venv_xtts/bin/python …`.
 
-## 10. IndexTTS-2 — the proposed next move
+## 10. IndexTTS-2 — current winner (zero-shot, 2026-05-19)
 
-**[IndexTTS-2 paper — arXiv 2502.05512 (Feb 2025; v2 released Sept 2025)](https://arxiv.org/abs/2502.05512)** · **[code (index-tts/index-tts)](https://github.com/index-tts/index-tts)** · **[weights (IndexTeam/IndexTTS-2)](https://huggingface.co/IndexTeam/IndexTTS-2)**
+**[IndexTTS-2 paper — arXiv 2502.05512](https://arxiv.org/abs/2502.05512)** · **[code (index-tts/index-tts)](https://github.com/index-tts/index-tts)** · **[weights (IndexTeam/IndexTTS-2)](https://huggingface.co/IndexTeam/IndexTTS-2)**
 
-Why it should beat both F5-TTS and XTTS-v2:
-- **Audio-only reference** (`spk_audio_prompt`, no `ref_text`) → no architectural leakage, like XTTS but newer.
-- **Autoregressive with explicit duration control** — duration is a controllable input, not emergent. Reduces the failure modes that produce gibberish.
-- Paper reports it **beats F5-TTS and CosyVoice 2 on WER, SIM, and emotional fidelity** in zero-shot benchmarks.
-- Open weights, MIT-style license.
+**Result on 15-phrase eval (CPU, M3 Pro, `ref_narrator.wav`)**: WER **0.037**, ECAPA **0.784**, DNSMOS OVR **2.90**. Voice is recognizable, intelligible, no gibberish. Verified by ear.
 
-Risks:
-- Docs assume CUDA 12.8. No documented MPS or CPU path. On M3 Pro this means CPU inference (likely working but slow) or rent a cloud GPU.
-- Newer repo — install pins are likely fragile. Same playbook as XTTS-v2: dedicated `.venv_indextts/`, pin `torch<2.6` and `transformers<4.44` if needed.
+Why it beat both F5-TTS and XTTS-v2:
+- **Audio-only reference** (`spk_audio_prompt`, no `ref_text`) → no architectural leakage, like XTTS-v2.
+- **Autoregressive with explicit duration control** — duration is a controllable input, not emergent. Eliminates the short-text failure modes that produce gibberish in F5-TTS.
+- Speaker conditioning via W2V-BERT features + CAMPPlus style vector — richer than XTTS-v2's encoder, yielding +0.10 ECAPA over XTTS at comparable WER.
 
-Full implementation plan: **[indextts_plan.md](./indextts_plan.md)** — feasibility gate first, then `scripts/indextts_gen.py`, then score via `posthoc_eval.py --score-only`.
+Operational notes confirmed by running:
+- Install works on Mac via the repo's own `uv sync` (its `pyproject.toml` declares Mac-specific torch sources). No version pinning hacks needed.
+- `torch==2.8.0` works on CPU; MPS not tried (would need ops-by-ops audit).
+- CPU inference: ~48 s per 3 s phrase (RTF ~17.9). Tolerable for 15-phrase eval (~12 min). Unusable for real-time.
+- **No training script released** — repo is inference-only. Fine-tuning requires writing the training loop from scratch (see [indextts_experiments.md](./indextts_experiments.md) Experiment B).
+- Per-clip ECAPA spread: 0.747 (`cas_07`) to 0.851 (`cas_06`) on the 15-phrase eval. High variance suggests reference clip quality / register matters.
+
+Next: [indextts_experiments.md](./indextts_experiments.md) — two follow-up experiments to push ECAPA 0.784 → 0.80+ (speaker centroid first, then LoRA if needed).
 
 ## Prioritized recommendations for next experiments
 
-The F5-TTS exploration is exhausted. Items below are ordered by current ROI.
+F5-TTS and XTTS-v2 exploration are both exhausted. IndexTTS-2 is the new baseline. Items below are ordered by current ROI.
 
-**Now:**
+**Now**: see **[indextts_experiments.md](./indextts_experiments.md)** for the active plan. Two ordered experiments:
+1. **Speaker embedding centroid** (Exp A, ~half-day, low risk) — average ref-audio embeddings over 20 BC clips
+2. **LoRA fine-tune of IndexTTS-2 GPT** (Exp B, ~1 week, high risk) — only if Exp A doesn't reach ECAPA 0.82
 
-1. **IndexTTS-2 trial** ([indextts_plan.md](./indextts_plan.md)). Step 0 (feasibility gate) is 30 min; full eval ~3 h wall-clock. Highest expected value of any remaining experiment.
+**If both fail to break 0.82 on M3 Pro:**
 
-**If IndexTTS-2 fails or underwhelms:**
-
-2. **CosyVoice 2** (Apache-2.0, HF `FunAudioLLM/CosyVoice2-0.5B`). Same plan structure, different model. Slightly older (Dec 2024) but more mature codebase.
-3. **Fish Speech v1.5+** (HF `fishaudio/s2-pro`). Most mature pip-install path of the three.
-
-**If on-laptop M3 Pro can't run any of them:**
-
-4. Rent a 24 GB GPU (RunPod A5000 ~$0.35/hr) and run IndexTTS-2 / CosyVoice 2 with proper CUDA.
-5. Or **hybrid post-processing**: XTTS-v2 for words → fine-tuned voice-conversion stage for timbre. Architecturally hard, last resort.
+3. Rent a 24 GB GPU (RunPod A5000 ≈ $0.35/hr) for full-parameter fine-tuning of IndexTTS-2 / CosyVoice 2.
+4. Or **hybrid post-processing**: IndexTTS-2 for words → voice-conversion stage for timbre polish. Last resort.
 
 **Done (no longer recommended):**
 
-- ~~Knowledge distillation training~~ — λ=5 KD attempted on Casanova-only, Sherlock-only, and combined. All land at ECAPA ~0.82-0.83. F5-TTS fine-tuning is exhausted on this dataset.
+- ~~F5-TTS knowledge distillation~~ — λ=5 KD attempted on Casanova-only, Sherlock-only, and combined. All land at ECAPA 0.82-0.83 with WER 1.4. F5-TTS fine-tuning exhausted.
 - ~~F5R-TTS investigation~~ — checked 2026-05-19, not doable on M3 Pro (see §4).
-- ~~`local_speed=0.3` short-text fix~~, ~~cfg < 2.0 sweep~~, ~~BigVGAN A/B~~ — all already absorbed into the selective-CFG baseline; no remaining ROI on F5-TTS inference knobs.
+- ~~XTTS-v2 as primary~~ — ran 2026-05-19, ECAPA 0.69 too low. Kept as a curiosity reference.
+- ~~`local_speed=0.3` short-text fix~~, ~~cfg < 2.0 sweep~~, ~~BigVGAN A/B~~ — already absorbed into selective-CFG; no remaining ROI on F5-TTS inference knobs.
+- ~~CosyVoice 2 / Fish Speech v1.5 trial~~ — deprioritized after IndexTTS-2 succeeded. Revisit only if IndexTTS-2 fine-tune fails.
 
 ## Sources
 

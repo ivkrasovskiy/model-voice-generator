@@ -6,6 +6,16 @@ Guidance for Claude Code when working in this repo.
 
 Mimic Benedict Cumberbatch's **voice identity** — timbre, low-frequency depth, RP accent. **Audiobook narration cadence is a non-goal**; we want his voice in *any* content. Priority: **ECAPA(gen, real_clip) > WER > DNSMOS**.
 
+## Current state (2026-05-19)
+
+**IndexTTS-2 is the current winner.** Zero-shot, no fine-tune: **ECAPA 0.784, WER 0.037, DNSMOS 2.90**. Voice is recognizable, intelligible, no gibberish. Verified by ear on 15 short phrases. Trade-offs vs F5-TTS confirmed: F5-TTS has higher ECAPA on paper (0.827) but its WER 1.4 means many outputs are unusable. IndexTTS-2 is the practical winner.
+
+**F5-TTS is retired** from active development on this project. Seven fine-tune runs all landed at ECAPA 0.82-0.83 with WER 1.4 — architectural ceiling reached. Reference-text leakage cannot be removed without rewriting the architecture (see [docs/literature_notes.md §6](docs/literature_notes.md)).
+
+**Next**: push ECAPA from 0.784 → 0.80+ via two experiments planned in [docs/indextts_experiments.md](docs/indextts_experiments.md):
+- **Experiment A** (low risk, half-day): speaker embedding centroid — average ref-audio embeddings from 20 high-quality BC clips
+- **Experiment B** (high effort, ~1 week, only if A doesn't reach 0.82): LoRA fine-tune of the IndexTTS-2 GPT submodule
+
 ## Hardware
 
 - macOS, **Apple M3 Pro, 18 GB unified memory**
@@ -56,9 +66,36 @@ scripts/
 | `.venv/` | `uv sync` (main) | F5-TTS, fine-tune, posthoc eval | Project's primary deps |
 | `.venv_xtts/` | `uv venv` + `uv pip install TTS "torch<2.6" "transformers<4.44"` | XTTS-v2 generation | Coqui TTS needs old torch + transformers |
 | `.venv_openvoice/` | (existing) | OpenVoice V2 generation | Conflicts with MeloTTS pins |
-| `.venv_indextts/` | per [indextts_plan.md](docs/indextts_plan.md) | IndexTTS-2 (planned) | CUDA-targeted repo; isolate |
+| `vendor/index-tts/.venv/` | `cd vendor/index-tts && uv sync --no-dev` | **IndexTTS-2 (current winner)** | Mac torch + repo's own deps |
 
 All scoring goes back through the main `.venv/` via `posthoc_eval.py --score-only` — that path is venv-agnostic (reads `manifest.json` + WAVs).
+
+## IndexTTS-2 install pins (DO NOT TOUCH without verifying smoke test)
+
+These are the exact versions that produced the locked baseline (ECAPA 0.784, WER 0.037 on 15-phrase eval).
+
+| Component | Pin | Where |
+|---|---|---|
+| IndexTTS-2 repo SHA | `830f6f8f94a51fea23ab1d639027a86200075a4e` | `vendor/index-tts/` (git-ignored). Date: 2026-03-16. |
+| HuggingFace weights revision | `740dcaff396282ffb241903d150ac011cd4b1ede` | `vendor/index-tts/checkpoints/` (~8.3 GB) |
+| Python | 3.10.20 (via uv) | `vendor/index-tts/.venv/` |
+| torch | 2.8.0 | per repo's pyproject.toml |
+| transformers | 4.52.1 | per repo's pyproject.toml |
+
+**Rebuild from scratch** (if `vendor/index-tts/` is lost):
+```bash
+git clone https://github.com/index-tts/index-tts.git vendor/index-tts
+cd vendor/index-tts && git checkout 830f6f8f && uv sync --no-dev
+.venv/bin/huggingface-cli download IndexTeam/IndexTTS-2 \
+    --revision 740dcaff396282ffb241903d150ac011cd4b1ede \
+    --local-dir checkpoints
+cd .. && .. && vendor/index-tts/.venv/bin/python scripts/indextts_smoke_test.py
+```
+
+**Regression protection**:
+- `tts_output/eval_indextts_v2/scores.regression_baseline.csv` — locked baseline scores; never overwrite
+- `scripts/indextts_smoke_test.py` — runs in ~2 min; asserts `cas_01` and `sher_03` WER ≤ 0.10 and ECAPA ≥ 0.74. Run after any experiment that touches IndexTTS-2 inference paths.
+- Future experiment outputs go in **new** dirs (`tts_output/eval_indextts_centroid_*`, `tts_output/eval_indextts_lora_*`) — never reuse `eval_indextts_v2/`.
 
 ## Active scripts — key flags
 
@@ -81,7 +118,9 @@ All scoring goes back through the main `.venv/` via `posthoc_eval.py --score-onl
 | `data/cumberbatch_combined_cas_sher/` | Casanova_clean + Sherlock_narrator | 2114 | 3.5h | Used for `finetune_kd_combined_lam5_v2` |
 
 - **Centroid**: `data/cumberbatch_casanova/centroid.npy` — robust centroid of Casanova, used to filter Sherlock
-- **Eval set**: `tts_output/cross_eval_50/eval_short.csv` — 10 Casanova + 5 Sherlock short phrases (<60 chars), verified not in any training set, each with `ref_audio_path` to real clip
+- **Eval sets** (both in `tts_output/cross_eval_50/`, both with leakage protection: clips disjoint from train354 subsets):
+  - `eval_short.csv` — 15 short phrases (3-5s, 10 Casanova + 5 Sherlock). Primary metric.
+  - `eval_long.csv` — 8 long phrases (9-12s, 5 Casanova + 3 Sherlock). Tests register/breath stability.
 - **Reference clips**: `tts_output/ref_narrator.wav` (12s Casanova, F5-TTS inference), `tts_output/ref_combined.wav` (18s Casanova+Sherlock), `tts_output/ref_sherlock.wav` (6s Sherlock)
 
 ## Training runs
@@ -111,7 +150,8 @@ Per-clip ECAPA standard: `ECAPA(generated, real_clip)` per phrase, using `--phra
 | F5-TTS baseline (sel-CFG) | 1.388 | **0.827** | 3.86 | Ref-text leakage caps WER |
 | F5-TTS `finetune_kd_combined_lam5_v2/best.pt` | 1.404 | 0.828 | 3.91 | No identity gain over baseline |
 | F5-TTS `finetune_kd_combined_lam5_v2/ema_best.pt` | 1.369 | 0.826 | 3.87 | Slightly better WER, same identity |
-| XTTS-v2 zero-shot (ref_narrator.wav) | **0.108** | 0.689 | 2.58 | No leakage — but lower identity + quality |
+| IndexTTS-v2 zero-shot (ref_narrator.wav) | **0.037** | 0.784 | 2.90 | No leakage, marginal ECAPA — try fine-tune |
+| XTTS-v2 zero-shot (ref_narrator.wav) | 0.108 | 0.689 | 2.58 | No leakage — but lower identity + quality |
 
 **The architectural trade-off is confirmed by data**: F5-TTS owns identity (ECAPA 0.83) via mel-conditioning, but ref-text leakage cripples WER. XTTS-v2 owns intelligibility (WER 0.11) via speaker-embedding conditioning, but identity drops to 0.69. **No single off-the-shelf model on M3 Pro currently does both.**
 
@@ -125,11 +165,11 @@ Per-clip ECAPA standard: `ECAPA(generated, real_clip)` per phrase, using `--phra
 - **EMA implemented**: `EMATracker` in `finetune_f5.py`. `ema_best.pt` saved alongside `best.pt`. Checkpoints 456 MB.
 - **Eval methodology stabilized**: 15-phrase set with real-clip ECAPA targets. Old 6-phrase / centroid-based numbers are deprecated.
 
-## Next steps (priority order)
+## Next steps
 
-1. **IndexTTS-2 (Sept 2025) trial** — see [docs/indextts_plan.md](docs/indextts_plan.md). Self-contained plan with feasibility gate, install gotchas, and fallback ladder (CosyVoice 2 → Fish Speech v1.5). This is the only path forward that hasn't been exhausted.
-2. **If IndexTTS-2 fails on M3 Pro**: rent a 24 GB cloud GPU and run IndexTTS-2 or CosyVoice 2 properly. See [docs/finetune_layers.md](docs/finetune_layers.md) §"When to migrate off F5-TTS" for cost.
-3. **If all modern models stall**: hybrid post-processing — XTTS-v2 for content + voice-conversion step using a fine-tuned BC encoder. Architecturally hard, last resort.
+See **[docs/indextts_experiments.md](docs/indextts_experiments.md)** — self-contained plan with two ordered experiments (A: speaker embedding centroid → B: LoRA fine-tune) and eval protocol covering both short and long phrases.
+
+The plan is sized for a fresh Sonnet session and includes the failure-mode decision tree for each step.
 
 Dropped from previous plan:
 - ~~F5R-TTS RL fine-tune~~ — not feasible on this hardware. See [literature_notes.md §4](docs/literature_notes.md).
