@@ -93,7 +93,12 @@
       "Bash(/bin/ps -A -o pid,command)",
       "Bash(/usr/bin/grep -E \"posthoc|cross_eval\")",
       "Bash(/usr/bin/grep posthoc *)",
-      "Bash(xargs kill)"
+      "Bash(xargs kill)",
+      "Bash(tee logs/indextts_centroid_short.log)",
+      "Bash(tee logs/indextts_centroid_long.log)",
+      "Bash(tee logs/indextts_baseline_long.log)",
+      "Bash(tee logs/indextts_interview_short.log)",
+      "Bash(tee logs/indextts_interview_long.log)"
     ],
     "additionalDirectories": [
       "/private/tmp/openvoice_src"

@@ -150,8 +150,18 @@ Per-clip ECAPA standard: `ECAPA(generated, real_clip)` per phrase, using `--phra
 | F5-TTS baseline (sel-CFG) | 1.388 | **0.827** | 3.86 | Ref-text leakage caps WER |
 | F5-TTS `finetune_kd_combined_lam5_v2/best.pt` | 1.404 | 0.828 | 3.91 | No identity gain over baseline |
 | F5-TTS `finetune_kd_combined_lam5_v2/ema_best.pt` | 1.369 | 0.826 | 3.87 | Slightly better WER, same identity |
-| IndexTTS-v2 zero-shot (ref_narrator.wav) | **0.037** | 0.784 | 2.90 | No leakage, marginal ECAPA — try fine-tune |
+| IndexTTS-v2 zero-shot (ref_narrator.wav, audiobook) | **0.037** | 0.784 | 2.90 | Locked baseline. No leakage, marginal ECAPA. |
+| IndexTTS-v2 centroid-20 (Exp A) | 0.042 | 0.700 | 2.95 | **Regression −0.084 ECAPA** vs baseline. Mean-averaging `spk_cond_emb` across clips loses speaker info: frame-t features carry phoneme content, not just speaker identity, so the average is mush. |
+| IndexTTS-v2 interview ref (4:47-5:01 of [cHmkAStZBkc](https://youtu.be/cHmkAStZBkc)) | 0.051 | 0.310 | 2.73 | ECAPA crash — but ECAPA target clips are all audiobook BC. Measures distribution shift, not necessarily identity loss. **Listen-check required.** |
 | XTTS-v2 zero-shot (ref_narrator.wav) | 0.108 | 0.689 | 2.58 | No leakage — but lower identity + quality |
+
+8-phrase long eval (new, 9-12s phrases — tests register/breath stability):
+
+| Model | WER ↓ | ECAPA ↑ | DNSMOS OVR ↑ | Note |
+|---|---|---|---|---|
+| IndexTTS-v2 zero-shot (ref_narrator.wav, audiobook) | **0.013** | **0.846** | 3.48 | Long context lets ECAPA lock onto speaker more confidently than short eval (0.846 vs 0.784) |
+| IndexTTS-v2 centroid-20 (Exp A) | 0.017 | 0.738 | 3.21 | Same regression pattern as short — centroid hurts identity |
+| IndexTTS-v2 interview ref | 0.028 | 0.322 | 3.13 | Same crash pattern as short. Both eval targets are audiobook BC, so this is a target-mismatch artifact, not necessarily identity loss. |
 
 **The architectural trade-off is confirmed by data**: F5-TTS owns identity (ECAPA 0.83) via mel-conditioning, but ref-text leakage cripples WER. XTTS-v2 owns intelligibility (WER 0.11) via speaker-embedding conditioning, but identity drops to 0.69. **No single off-the-shelf model on M3 Pro currently does both.**
 
@@ -167,14 +177,20 @@ Per-clip ECAPA standard: `ECAPA(generated, real_clip)` per phrase, using `--phra
 
 ## Next steps
 
-See **[docs/indextts_experiments.md](docs/indextts_experiments.md)** — self-contained plan with two ordered experiments (A: speaker embedding centroid → B: LoRA fine-tune) and eval protocol covering both short and long phrases.
+**Experiment A (centroid) result: regression.** Mean-averaging `spk_cond_emb` across 20 refs drops ECAPA by 0.08 on short eval, 0.11 on long eval. Hypothesis: W2V-BERT features at frame `t` carry phoneme content as well as speaker info — averaging across temporally-unaligned clips destroys both. The CAMPPlus `style` vector (192-d global) is the only naturally averageable component, but on its own it can't carry enough identity. Centroid lever is exhausted as designed.
 
-The plan is sized for a fresh Sonnet session and includes the failure-mode decision tree for each step.
+**LoRA (Experiment B) is postponed.** New focus is on the *reference-clip* side of the pipeline, where the cheap wins live:
+
+1. **Creak filter / podcast refs** — current `ref_narrator.wav` is 12s of Casanova audiobook, which carries BC's narrator-creak. Test single-clip refs from podcast/interview material. Expected impact: cleaner voice quality without ECAPA loss. ~1h.
+2. **Emotion-vector knob** — IndexTTS-2 accepts an 8-d `emo_vector` (calm, sad, …). Push "calm" up to see if it attenuates creak in generation. ~1h.
+3. **Allosaurus/Charsiu phoneme analysis pipeline** (independent of TTS) — extract IPA tier from BC's audiobook + interviews + user's recordings for accent comparison. Creak doesn't affect phoneme identity, so the existing data is fine. ~half day.
 
 Dropped from previous plan:
 - ~~F5R-TTS RL fine-tune~~ — not feasible on this hardware. See [literature_notes.md §4](docs/literature_notes.md).
 - ~~In-training ECAPA hook~~ — further F5-TTS training won't move the number.
 - ~~More Sherlock/interview data~~ — only worth it once we have a model architecturally capable of using it without leakage.
+- ~~Experiment A (centroid)~~ — completed 2026-05-19, regression. Artifacts in `tts_output/eval_indextts_centroid_{short,long}/`.
+- ~~Experiment B (LoRA)~~ — postponed; the cheap reference-side experiments above must come first.
 
 ## Memory / MPS
 
