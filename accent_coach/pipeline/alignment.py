@@ -5,17 +5,37 @@ from pathlib import Path
 
 from accent_coach.models import PhonemeInstance
 
-# ARPABET → IPA mapping (subset covering English phoneme inventory)
+# ARPABET → IPA mapping (stress-aware for vowels that reduce in unstressed position).
+# Why stress digits matter: CMU dict uses AH0 for schwa and AH1/AH2 for STRUT (/ʌ/).
+# Stripping digits before mapping turns every "the/a/of" into /ʌ/ and contaminates scoring.
 ARPABET_TO_IPA: dict[str, str] = {
+    # Vowels — stressed forms
+    "AA1": "ɑː", "AA2": "ɑː",
+    "AE1": "æ",  "AE2": "æ",
+    "AH1": "ʌ",  "AH2": "ʌ",   # stressed STRUT
+    "AH0": "ə",                  # unstressed schwa
+    "AO1": "ɔː", "AO2": "ɔː",
+    "AW1": "aʊ", "AW2": "aʊ",
+    "AY1": "aɪ", "AY2": "aɪ",
+    "EH1": "ɛ",  "EH2": "ɛ",
+    "ER1": "ɜː", "ER2": "ɜː",   "ER0": "ə",
+    "EY1": "eɪ", "EY2": "eɪ",
+    "IH1": "ɪ",  "IH2": "ɪ",   "IH0": "ɪ",
+    "IY1": "iː", "IY2": "iː",   "IY0": "ɪ",
+    "OW1": "əʊ", "OW2": "əʊ",   "OW0": "ə",
+    "OY1": "ɔɪ", "OY2": "ɔɪ",
+    "UH1": "ʊ",  "UH2": "ʊ",    "UH0": "ə",
+    "UW1": "uː", "UW2": "uː",   "UW0": "ʊ",
+    # Consonants (no stress digits in CMU dict)
+    "B": "b", "CH": "tʃ", "D": "d", "DH": "ð", "F": "f",
+    "G": "ɡ", "HH": "h",  "JH": "dʒ", "K": "k", "L": "l",
+    "M": "m", "N": "n",  "NG": "ŋ",  "P": "p",  "R": "r",
+    "S": "s", "SH": "ʃ", "T": "t",  "TH": "θ", "V": "v",
+    "W": "w", "Y": "j",  "Z": "z",  "ZH": "ʒ",
+    # Legacy bare vowel codes (fallback for non-cmudict paths)
     "AA": "ɑː", "AE": "æ", "AH": "ʌ", "AO": "ɔː", "AW": "aʊ",
-    "AY": "aɪ", "B": "b", "CH": "tʃ", "D": "d", "DH": "ð",
-    "EH": "ɛ", "ER": "ɜː", "EY": "eɪ", "F": "f", "G": "ɡ",
-    "HH": "h", "IH": "ɪ", "IY": "iː", "JH": "dʒ", "K": "k",
-    "L": "l", "M": "m", "N": "n", "NG": "ŋ", "OW": "əʊ",
-    "OY": "ɔɪ", "P": "p", "R": "r", "S": "s", "SH": "ʃ",
-    "T": "t", "TH": "θ", "UH": "ʊ", "UW": "uː", "V": "v",
-    "W": "w", "Y": "j", "Z": "z", "ZH": "ʒ",
-    # Reduced/schwa
+    "AY": "aɪ", "EH": "ɛ", "ER": "ɜː", "EY": "eɪ", "IH": "ɪ",
+    "IY": "iː", "OW": "əʊ", "OY": "ɔɪ", "UH": "ʊ", "UW": "uː",
     "AX": "ə", "IX": "ɪ",
 }
 
@@ -23,11 +43,11 @@ IPA_VOWELS = frozenset(
     ["æ", "ɑː", "ɒ", "ɔː", "ʊ", "uː", "ɪ", "iː", "ɛ", "ʌ", "ɜː", "eɪ", "aɪ", "ɔɪ", "aʊ", "əʊ", "ə", "ɐ"]
 )
 
-# ARPABET vowel tokens (with stress digits stripped) for stress detection
-_ARPABET_VOWELS = frozenset(ARPABET_TO_IPA.keys()) & {
-    "AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY",
-    "IH", "IY", "OW", "OY", "UH", "UW", "AX", "IX",
-}
+# All ARPABET tokens that are vowels (stress-digit forms + legacy bare forms)
+_ARPABET_VOWEL_BASES = {"AA","AE","AH","AO","AW","AY","EH","ER","EY","IH","IY","OW","OY","UH","UW","AX","IX"}
+_ARPABET_VOWELS = frozenset(
+    k for k in ARPABET_TO_IPA if re.sub(r"\d","",k) in _ARPABET_VOWEL_BASES
+)
 
 # Minimal word-level stress exceptions (secondary syllable is primary stress)
 _STRESS_EXCEPTIONS: dict[str, set[int]] = {
@@ -62,13 +82,13 @@ def _get_cmu_dict() -> dict[str, list[str]]:
 
 
 def _g2p(word: str) -> list[str]:
-    """Return ARPABET phoneme list (no stress digits) for a word via CMU dict."""
+    """Return ARPABET phoneme list (stress digits preserved on vowels) for a word."""
     key = re.sub(r"[^a-z']", "", word.lower())
     pronunciations = _get_cmu_dict().get(key)
     if not pronunciations:
         return []
-    # Strip stress digits from vowels; keep consonant labels as-is
-    return [re.sub(r"\d", "", p) for p in pronunciations[0]]
+    # Keep stress digits: AH0=schwa, AH1=STRUT — stripping them collapses that distinction.
+    return list(pronunciations[0])
 
 
 def _syllable_index(phonemes: list[str]) -> list[int]:

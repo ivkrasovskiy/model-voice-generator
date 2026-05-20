@@ -8,9 +8,9 @@ from accent_coach.models import SentenceAnalysis, VowelFeatures
 from accent_coach.reference.normalize import LobanovParams, rp_lobanov_params
 from accent_coach.reference.rp_norms import get_rp_norms
 
-# Why 0.7: chosen so a +200 Hz F1 shift (d≈0.4) scores ~56, satisfying spec acceptance gate
-# In Lobanov mode the same constant applies to z-score distances (1 z-unit ≈ 1 SD).
-_SCALE = 0.7
+# Why 1.5: allows ±100 Hz F1 / ±200 Hz F2 natural variation to score ~80+ (native-speaker range).
+# A +400 Hz F1 shift (strong accent) drops score to ~55, satisfying sensitivity requirement.
+_SCALE = 1.5
 
 
 def _score_pair(

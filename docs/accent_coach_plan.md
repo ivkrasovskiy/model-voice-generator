@@ -11,6 +11,80 @@ Phase 0 ends when the validation experiments below pass on real audio.
 
 ---
 
+## Current status — 2026-05-20
+
+> **Findings doc**: [`docs/accent_coach_phase0_findings.md`](accent_coach_phase0_findings.md)
+> — read this before continuing work. It records what works, what is broken,
+> and what the per-phoneme scores actually say.
+
+**Phase 0 acceptance gate: NOT MET.**
+
+| Step | Status |
+|---|---|
+| 1 Bootstrap (deps, skeleton, models) | ✅ Done |
+| 2 Calibration sentences (50) | ✅ Done |
+| 3 Forced alignment (WhisperX + cmudict G2P) | ✅ Done — stress-aware AH0/AH1 |
+| 4 Formant extraction (parselmouth) | ✅ Done — voiced-fraction filter, F1 ceiling |
+| 5 VOT extraction | ✅ Done |
+| 6 Prosody (pitch, nPVI) | ✅ Done |
+| 7 Feature aggregation | ✅ Done |
+| 8 Reference norms (Deterding 1997) | ✅ Done — all values cited |
+| 9 Comparison & scoring (6 modules) | ✅ Done — **vowel scale = 1.5** |
+| 10 Diagnostics / articulatory advice | ✅ Done — output is meaningful |
+| 11 CLI scripts | ✅ Done |
+| 12 Unit tests (8 passing) | ✅ Done |
+| 12b Integration tests (3, skip without audio) | ✅ Done |
+| 13 Validation notebook (3-way: BC/you/RP) | ✅ Done |
+| 14 CLAUDE.md update | ✅ Done |
+| Exp A — BC synth ≥ 85 | ❌ Actual: ~54. Broken by rhythm/stress (see findings) |
+| Exp B — Owner ≤ 65 | ⚠️ Actual: ~53. Correct direction, gate not met |
+| Exp C — diff ≤ ±5 | ❌ Actual: +17. TTS biases in BC reference vowels |
+| Accent classification (per-phoneme) | ✅ Meaningful — see findings |
+
+### What is broken and why
+
+**Composite score doesn't separate BC from owner (~54 vs ~53).**
+Root causes — both documented in the findings doc:
+
+1. **Rhythm score** (15% weight): TTS generates uniform timing → nPVI ≈ 37 vs RP
+   target 55–75. BC gets penalised for a TTS artefact, not an accent feature.
+
+2. **Stress score** (15% weight): G2P assigns uniform duration within words, so
+   all syllables have identical duration by construction. The duration component
+   of stress detection is always zero → scores ≈ 8–12/100 for everyone.
+
+3. **TTS vowel biases**: IndexTTS generates /æ/, /ʌ/, /ɛ/ differently from
+   Deterding 1997 norms. On those three phonemes BC scores *worse* than the owner,
+   cancelling the /iː/ advantage (+29 gap) in the aggregate.
+
+### What IS working and meaningful
+
+The per-phoneme vowel analysis separates BC from owner on the diagnostically
+important phonemes:
+
+| Phoneme | BC score | Owner | Gap |
+|---|---|---|---|
+| /iː/ | 87 | 58 | +29 ✓ |
+| /ʊ/ | 80 | 67 | +13 ✓ |
+| /ɔː/ | 82 | 73 | +9 ✓ |
+
+Owner's /iː/ F2 is 447 Hz from RP (vs BC's 133 Hz) — **3× worse**. This is the
+primary Slavic accent marker and it IS being detected correctly.
+
+The articulatory diagnostic strings are phonetically plausible and match what
+a phonetician would say (see findings doc for details).
+
+### What needs to change before the gate can pass
+
+1. Fix syllable timing — replace uniform G2P with vowel-nucleus onset detection.
+   This fixes both the stress score and improves formant window accuracy.
+2. Update RP norms to post-2000 SSBE data (Deterding 1997 is 30 years old).
+3. Either use real BC recordings as reference (removing TTS biases) or add a
+   per-phoneme TTS-bias correction.
+4. Consider down-weighting rhythm/stress (to 5% each) until timing is fixed.
+
+---
+
 ## What Phase 0 must prove
 
 Three claims, in order of importance:

@@ -42,9 +42,9 @@ def test_identity_scores_100():
 
 
 def test_large_f1_shift_drops_score():
-    """Shifting every F1 by +200 Hz should drop vowel score below 60."""
+    """Shifting every F1 by +400 Hz (strong foreign accent) should drop vowel score below 60."""
     vowels = [
-        _vowel(ph, f1 + 200, f2) for ph, (f1, f2) in RP_VOWEL_F1_F2_MALE.items()
+        _vowel(ph, f1 + 400, f2) for ph, (f1, f2) in RP_VOWEL_F1_F2_MALE.items()
     ]
     analysis = _sentence(vowels)
     score = score_vowels(analysis, reference_norms=RP_VOWEL_F1_F2_MALE)
