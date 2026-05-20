@@ -10,6 +10,7 @@ from accent_coach.comparison.stress import score_stress
 from accent_coach.comparison.vowels import score_vowels
 from accent_coach.diagnostics.advice import build_vowel_diagnostics
 from accent_coach.models import ComparisonResult, SentenceAnalysis
+from accent_coach.reference.normalize import LobanovParams
 from accent_coach.reference.rp_norms import get_rp_norms
 
 # Default skill weights from spec
@@ -29,6 +30,8 @@ def compare(
     user_sr: int,
     target: SentenceAnalysis | None = None,
     reference_norms: dict[str, tuple[float, float]] | None = None,
+    speaker_lobanov: LobanovParams | None = None,
+    ref_lobanov: LobanovParams | None = None,
 ) -> ComparisonResult:
     """Produce a full ComparisonResult for one sentence."""
 
@@ -39,7 +42,10 @@ def compare(
         )
         reference_norms = get_rp_norms(mean_f0)
 
-    vowel_score = score_vowels(user, reference_norms=reference_norms, target=target)
+    vowel_score = score_vowels(
+        user, reference_norms=reference_norms, target=target,
+        speaker_params=speaker_lobanov, ref_params=ref_lobanov,
+    )
     aspiration_bd = score_aspiration(user, target=target)
     rhythm_bd = score_rhythm(user, target=target)
     stress_score = score_stress(user, target=target)

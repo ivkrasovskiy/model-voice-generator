@@ -5,15 +5,27 @@ import math
 import numpy as np
 
 from accent_coach.models import SentenceAnalysis, VowelFeatures
+from accent_coach.reference.normalize import LobanovParams, rp_lobanov_params
 from accent_coach.reference.rp_norms import get_rp_norms
 
-_SCALE = 0.7  # Why: chosen so a +200 Hz F1 shift (d≈0.4) scores ~56, satisfying spec acceptance gate
+# Why 0.7: chosen so a +200 Hz F1 shift (d≈0.4) scores ~56, satisfying spec acceptance gate
+# In Lobanov mode the same constant applies to z-score distances (1 z-unit ≈ 1 SD).
+_SCALE = 0.7
 
 
-def _score_vowel_pair(
-    user_f1: float, user_f2: float, ref_f1: float, ref_f2: float
+def _score_pair(
+    user_f1: float, user_f2: float,
+    ref_f1: float, ref_f2: float,
+    speaker_params: LobanovParams | None,
+    ref_params: LobanovParams | None,
 ) -> float:
-    d = math.sqrt(((user_f1 - ref_f1) / 500) ** 2 + ((user_f2 - ref_f2) / 1000) ** 2)
+    if speaker_params is not None and ref_params is not None:
+        # Compare in Lobanov z-score space — removes vocal-tract-length effect
+        uz1, uz2 = speaker_params.normalise(user_f1, user_f2)
+        rz1, rz2 = ref_params.normalise(ref_f1, ref_f2)
+        d = math.sqrt((uz1 - rz1) ** 2 + (uz2 - rz2) ** 2)
+    else:
+        d = math.sqrt(((user_f1 - ref_f1) / 500) ** 2 + ((user_f2 - ref_f2) / 1000) ** 2)
     return 100.0 * math.exp(-d / _SCALE)
 
 
@@ -21,18 +33,19 @@ def score_vowels(
     user: SentenceAnalysis,
     reference_norms: dict[str, tuple[float, float]] | None = None,
     target: SentenceAnalysis | None = None,
+    speaker_params: LobanovParams | None = None,
+    ref_params: LobanovParams | None = None,
 ) -> float:
-    """Score vowel accuracy against reference norms or a target utterance.
+    """Score vowel accuracy.
 
-    If reference_norms is given, use those. If target is given, compare
-    user formants against target formants on a per-phoneme basis.
-    Exactly one of the two must be provided.
+    When speaker_params and ref_params are provided (Lobanov mode), distances are
+    computed in z-score space, removing the vocal-tract-length effect that makes
+    a low-pitched speaker (like BC TTS at ~76 Hz) look systematically off in raw Hz.
     """
     if not user.vowels:
         return 0.0
 
     if target is not None:
-        # Group target vowels by phoneme
         tgt_by_phoneme: dict[str, list[VowelFeatures]] = {}
         for v in target.vowels:
             tgt_by_phoneme.setdefault(v.phoneme.phoneme, []).append(v)
@@ -43,19 +56,27 @@ def score_vowels(
                 continue
             tgt_f1 = float(np.mean([t.f1 for t in tgt_list]))
             tgt_f2 = float(np.mean([t.f2 for t in tgt_list]))
-            scores.append(_score_vowel_pair(v.f1, v.f2, tgt_f1, tgt_f2))
+            # For user-vs-target mode, build per-target params on the fly if needed
+            t_params = ref_params
+            if t_params is None and speaker_params is not None:
+                t_params = speaker_params  # same speaker space as fallback
+            scores.append(_score_pair(v.f1, v.f2, tgt_f1, tgt_f2, speaker_params, t_params))
         return float(np.mean(scores)) if scores else 0.0
 
     norms = reference_norms or {}
-    # Fall back to speaker f0 estimate
     if not norms and user.vowels:
-        mean_f0 = float(np.mean([v.pitch_mean for v in user.vowels if v.pitch_mean > 70] or [120]))
+        mean_f0 = float(np.mean([v.pitch_mean for v in user.vowels if v.pitch_mean > 50] or [120]))
         norms = get_rp_norms(mean_f0)
+
+    # Build ref_params from norms if Lobanov mode is requested but ref_params not supplied
+    effective_ref_params = ref_params
+    if speaker_params is not None and effective_ref_params is None and norms:
+        effective_ref_params = rp_lobanov_params(norms)
 
     scores = []
     for v in user.vowels:
         ref = norms.get(v.phoneme.phoneme)
         if ref is None:
             continue
-        scores.append(_score_vowel_pair(v.f1, v.f2, ref[0], ref[1]))
+        scores.append(_score_pair(v.f1, v.f2, ref[0], ref[1], speaker_params, effective_ref_params))
     return float(np.mean(scores)) if scores else 0.0
