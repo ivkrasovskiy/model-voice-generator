@@ -38,6 +38,9 @@ dependencies = [
     "jiwer",          # Word Error Rate (Whisper transcript vs prompt)
     "speechbrain",    # ECAPA-TDNN speaker similarity (SOTA voxceleb embedding)
     "onnxruntime",    # DNSMOS audio-quality MOS prediction
+    "praat-parselmouth>=0.4.7",
+    "dtw-python>=1.5.3",
+    "whisperx>=3.3.1",
 ]
 
 [tool.uv]
@@ -46,6 +49,8 @@ package = false   # this is a research repo, not a distributable package
 
 [dependency-groups]
 dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
     "ruff>=0.7",
 ]
 

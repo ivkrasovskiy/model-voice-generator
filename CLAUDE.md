@@ -14,6 +14,16 @@ For the full backstory — F5-TTS / XTTS-v2 / OpenVoice / F5R-TTS / centroid
 experiments, dataset construction, why each approach failed — see
 [docs/history.md](docs/history.md).
 
+## Accent coach (in development)
+
+Per-phoneme accent assessment pipeline that scores a user's English against
+RP norms and against the cloned BC target. Code lives under `accent_coach/`,
+driven by `scripts/accent_coach_*.py`. Read these only if you're working on
+that feature: full spec in
+[docs/accent_coach_technical_spec.md](docs/accent_coach_technical_spec.md),
+sequenced Phase 0 execution plan in
+[docs/accent_coach_plan.md](docs/accent_coach_plan.md).
+
 ## Hardware
 
 macOS, Apple M3 Pro, 18 GB unified memory. IndexTTS-2 runs on **CPU**
