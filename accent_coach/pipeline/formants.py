@@ -6,7 +6,11 @@ import parselmouth
 from accent_coach.models import PhonemeInstance, VowelFeatures
 from accent_coach.pipeline.alignment import IPA_VOWELS
 
-_MIN_VOWEL_MS = 30.0
+_MIN_VOWEL_MS      = 40.0  # raised: very short windows land on transitions, not nuclei
+_MIN_VOICED_FRAC   = 0.35  # Why: require 35% of frames voiced; pure consonant/silence frames
+                            # have 0 voiced frames, real vowels typically > 60%.
+_MAX_F1_HZ         = 900.0 # Why: no English vowel nucleus has F1 > ~880 Hz (Wells 1982)
+_F0_FMIN           = 50    # Why: BC TTS fundamental sits at ~75 Hz; librosa fmin=70 misses it
 
 
 def _estimate_max_formant(audio: np.ndarray, sr: int) -> float:
@@ -41,7 +45,7 @@ def extract_vowel_features(
         pre_emphasis_from=50.0,
     )
 
-    f0_full = librosa.yin(audio.astype(np.float64), fmin=70, fmax=400, sr=sr)
+    f0_full = librosa.yin(audio.astype(np.float64), fmin=_F0_FMIN, fmax=400, sr=sr)
     hop = 512
     frame_times = librosa.frames_to_time(np.arange(len(f0_full)), sr=sr, hop_length=hop)
 
@@ -59,11 +63,19 @@ def extract_vowel_features(
         if np.isnan(f1) or np.isnan(f2):
             continue
 
-        # Pitch mean over vowel region
+        # Voiced-fraction filter: reject windows where < 35% of frames are voiced.
+        # Why fraction not mean: TTS (BC synth) has F0 ~75 Hz which sits at the edge
+        # of librosa's fmin; fraction is robust to that without needing a hardcoded Hz cutoff.
         mask = (frame_times >= p.start_time) & (frame_times <= p.end_time)
         f0_region = f0_full[mask]
-        voiced = f0_region[f0_region > 70]
+        voiced = f0_region[f0_region > _F0_FMIN]
+        voiced_frac = len(voiced) / max(len(f0_region), 1)
         pitch_mean = float(np.mean(voiced)) if len(voiced) else 0.0
+
+        if voiced_frac < _MIN_VOICED_FRAC:
+            continue
+        if f1 > _MAX_F1_HZ:
+            continue
 
         results.append(
             VowelFeatures(

@@ -6,8 +6,8 @@ import numpy as np
 def extract_pitch_contour(audio: np.ndarray, sr: int, n_points: int = 50) -> list[float]:
     import librosa
 
-    f0 = librosa.yin(audio.astype(np.float64), fmin=70, fmax=400, sr=sr)
-    voiced = np.where(f0 > 70, f0, np.nan)
+    f0 = librosa.yin(audio.astype(np.float64), fmin=50, fmax=400, sr=sr)
+    voiced = np.where(f0 > 50, f0, np.nan)
     # Interpolate over unvoiced gaps then downsample to n_points
     indices = np.arange(len(voiced))
     valid = ~np.isnan(voiced)
@@ -69,7 +69,7 @@ def extract_stress_pattern(
     hop = 512
     rms = librosa.feature.rms(y=audio.astype(np.float64), hop_length=hop)[0]
     rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop)
-    f0 = librosa.yin(audio.astype(np.float64), fmin=70, fmax=400, sr=sr)
+    f0 = librosa.yin(audio.astype(np.float64), fmin=50, fmax=400, sr=sr)
     f0_times = librosa.frames_to_time(np.arange(len(f0)), sr=sr, hop_length=hop)
 
     vowels = [(p.start_time, p.end_time) for p in phonemes if p.phoneme in IPA_VOWELS]
