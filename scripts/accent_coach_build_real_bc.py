@@ -167,31 +167,112 @@ def _whisperx_transcribe_diarize(wav_path: Path, hf_token: str) -> list[dict]:
     torch.load = _patched_load
 
     device = "cpu"
-    audio = whisperx.load_audio(str(wav_path))
+    words_cache = wav_path.parent / f"{wav_path.stem}_words.json"
 
-    print("  [whisperx] loading model large-v2 …", flush=True)
-    model = whisperx.load_model("large-v2", device=device, language="en",
-                                compute_type="float32")
-    result = model.transcribe(audio, batch_size=16)
+    if words_cache.exists():
+        print(f"  [whisperx] loading cached words from {words_cache.name} …", flush=True)
+        words_flat = json.load(words_cache.open())
+    else:
+        audio = whisperx.load_audio(str(wav_path))
 
-    print("  [whisperx] aligning …", flush=True)
-    model_a, metadata = whisperx.load_align_model(language_code="en", device=device)
-    result = whisperx.align(
-        result["segments"], model_a, metadata, audio, device=device,
-        return_char_alignments=False,
-    )
+        print("  [whisperx] loading model medium (int8) …", flush=True)
+        model = whisperx.load_model("medium", device=device, language="en",
+                                    compute_type="int8")
+        result = model.transcribe(audio, batch_size=8, verbose=True)
 
-    print("  [whisperx] diarizing …", flush=True)
-    import huggingface_hub
-    from whisperx.diarize import DiarizationPipeline
-    huggingface_hub.login(token=hf_token, add_to_git_credential=False)
-    diarize_model = DiarizationPipeline(device=device)
-    diarize_segments = diarize_model(audio)
-    result = whisperx.assign_word_speakers(diarize_segments, result)
+        print("  [whisperx] aligning …", flush=True)
+        model_a, metadata = whisperx.load_align_model(language_code="en", device=device)
+        result = whisperx.align(
+            result["segments"], model_a, metadata, audio, device=device,
+            return_char_alignments=False,
+        )
 
+        words_flat = []
+        for seg in result.get("segments", []):
+            for w in seg.get("words", []):
+                if "start" not in w or "end" not in w:
+                    continue
+                words_flat.append({
+                    "start": float(w["start"]),
+                    "end": float(w["end"]),
+                    "word": w.get("word", "").strip(),
+                    "speaker": "UNKNOWN",
+                })
+        words_cache.write_text(json.dumps(words_flat))
+        print(f"  [whisperx] cached {len(words_flat)} words → {words_cache.name}", flush=True)
+
+    # Replace pyannote diarization with ECAPA sliding-window speaker ID.
+    # pyannote/speaker-diarization-3.1 is a gated model requiring accepted user conditions.
+    # For a two-speaker interview where BC is the dominant speaker, ECAPA sliding window
+    # is sufficient and requires no network access or gated model agreement.
+    print("  [ecapa] sliding-window speaker ID (skipping pyannote diarization) …", flush=True)
+
+    # ECAPA sliding-window: label each word by the speaker of its 3s window
+    wav_np, wav_sr = sf.read(str(wav_path))
+    if wav_np.ndim > 1:
+        wav_np = wav_np.mean(axis=1)
+    wav_np = wav_np.astype(np.float32)
+    return _ecapa_assign_speakers(words_flat, wav_np, wav_sr)
+
+
+def _ecapa_assign_speakers(
+    words: list[dict], wav: np.ndarray, sr: int,
+    window_s: float = 3.0, stride_s: float = 1.5,
+) -> list[dict]:
+    """Label each word dict with 'speaker' = 'BC' or 'OTHER' via ECAPA windows."""
+    from scripts.lib.identity import embed_wav, load_ecapa
+
+    ref_wav, ref_sr = sf.read(str(PROJECT_ROOT / DEFAULT_REF))
+    if ref_wav.ndim > 1:
+        ref_wav = ref_wav.mean(axis=1)
+    ref_emb = embed_wav(ref_wav.astype(np.float32), ref_sr, load_ecapa())
+
+    total_s = len(wav) / sr
+    window_sims: dict[float, float] = {}  # start_s → cosine sim
+
+    t = 0.0
+    while t + window_s <= total_s:
+        chunk = wav[int(t * sr):int((t + window_s) * sr)]
+        emb = embed_wav(chunk, sr)
+        sim = float(np.dot(emb.flatten(), ref_emb.flatten()) /
+                    (np.linalg.norm(emb) * np.linalg.norm(ref_emb) + 1e-9))
+        window_sims[t] = sim
+        t += stride_s
+
+    window_starts = sorted(window_sims)
+
+    def _sim_at(word_mid: float) -> float:
+        if not window_starts:
+            return 0.0
+        closest = min(window_starts, key=lambda s: abs(s + window_s / 2 - word_mid))
+        return window_sims[closest]
+
+    result = []
+    for w in words:
+        mid = (w["start"] + w["end"]) / 2
+        sim = _sim_at(mid)
+        result.append({**w, "speaker": "BC" if sim >= 0.45 else "OTHER"})
+
+    bc_n = sum(1 for w in result if w["speaker"] == "BC")
+    print(f"    ECAPA: {bc_n}/{len(result)} words assigned to BC", flush=True)
+
+    # Flatten word list — all speakers present, build_real_bc picks BC by ECAPA cos to ref
+    words_with_speaker = []
+    for seg in result:
+        words_with_speaker.append({
+            "start": seg["start"],
+            "end": seg["end"],
+            "word": seg["word"],
+            "speaker": seg["speaker"],
+        })
+    return words_with_speaker
+
+
+def _whisperx_transcribe_diarize_unused(wav_path: Path, hf_token: str) -> list[dict]:
+    """Original pyannote path — kept for reference, not called."""
     # Flatten to word list with start/end/word/speaker
     words = []
-    for seg in result.get("segments", []):
+    for seg in []:
         for w in seg.get("words", []):
             if "start" not in w or "end" not in w:
                 continue

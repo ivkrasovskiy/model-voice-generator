@@ -52,7 +52,10 @@ def _resolve_path(raw_path: str) -> Path:
     return p
 
 
-def extract_formants(manifest_path: Path, out_csv: Path, source_label: str) -> None:
+def extract_formants(
+    manifest_path: Path, out_csv: Path, source_label: str,
+    label_from_manifest: bool = False,
+) -> None:
     from accent_coach.pipeline.alignment import align_audio
     from accent_coach.pipeline.formants import extract_vowel_features
 
@@ -64,6 +67,9 @@ def extract_formants(manifest_path: Path, out_csv: Path, source_label: str) -> N
         entry = _normalize_entry(raw_entry)
         clip_path = _resolve_path(entry["path"])
         transcript = entry["transcript"]
+        row_label = (f"{source_label}_{entry['label']}"
+                     if label_from_manifest and entry.get("label")
+                     else source_label)
         clip_id = entry["clip_id"]
 
         if not clip_path.exists():
@@ -88,7 +94,7 @@ def extract_formants(manifest_path: Path, out_csv: Path, source_label: str) -> N
             for vf in vowel_features:
                 rows.append({
                     "clip_id": clip_id,
-                    "source_label": source_label,
+                    "source_label": row_label,
                     "phoneme": vf.phoneme.phoneme,
                     "F1": round(vf.f1, 1),
                     "F2": round(vf.f2, 1),

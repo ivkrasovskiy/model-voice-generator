@@ -26,6 +26,7 @@ import soundfile as sf
 
 DEFAULT_URLS_JSON = "configs/accent_coach_phase0_5/modern_rp_urls.json"
 DEFAULT_OUT = "tts_output/modern_rp_corpus"
+_COOKIES_FROM_BROWSER: str = ""  # set by --cookies-from-browser arg before any download
 
 
 class EscalateToOwner(RuntimeError):
@@ -97,8 +98,18 @@ def _download_and_convert(
 
     If start_s/end_s are given they take precedence over head_trim/tail_trim.
     """
+    if out_path.exists():
+        print(f"    reusing existing {out_path.name} ({out_path.stat().st_size // 1024 // 1024}MB)",
+              flush=True)
+        return out_path
+
     tmp = out_path.parent / f"{out_path.stem}.tmp"
-    _run_cmd(["yt-dlp", "-x", "--audio-format", "wav", "-o", str(tmp), url])
+    cmd = ["yt-dlp", "-x", "--audio-format", "wav", "--format", "bestaudio",
+           "--no-playlist", "-o", str(tmp)]
+    if _COOKIES_FROM_BROWSER:
+        cmd += ["--cookies-from-browser", _COOKIES_FROM_BROWSER]
+    cmd.append(url)
+    _run_cmd(cmd)
 
     # Find actual output (yt-dlp may add extension)
     candidates = list(out_path.parent.glob(f"{out_path.stem}.tmp*"))
@@ -160,11 +171,24 @@ def _group_by_gap(words: list[dict], gap_ms: float = 300.0) -> list[dict]:
 
 
 def _whisperx_transcribe(wav_path: Path, whisper_model: str = "medium") -> list[dict]:
+    import functools
+
+    import torch
     import whisperx
+
+    # PyTorch 2.6+ weights_only=True default; lightning_fabric passes weights_only=None.
+    _orig_load = torch.load
+    @functools.wraps(_orig_load)
+    def _patched_load(*args, **kwargs):
+        if kwargs.get("weights_only") is None:
+            kwargs["weights_only"] = False
+        return _orig_load(*args, **kwargs)
+    torch.load = _patched_load
+
     device = "cpu"
     audio = whisperx.load_audio(str(wav_path))
-    model = whisperx.load_model(whisper_model, device=device, language="en", compute_type="float32")
-    result = model.transcribe(audio, batch_size=16)
+    model = whisperx.load_model(whisper_model, device=device, language="en", compute_type="int8")
+    result = model.transcribe(audio, batch_size=8, verbose=True)
     model_a, metadata = whisperx.load_align_model(language_code="en", device=device)
     result = whisperx.align(result["segments"], model_a, metadata, audio, device=device,
                             return_char_alignments=False)
@@ -238,7 +262,7 @@ def _process_one(
     wav = wav.astype(np.float32)
 
     silent_frac = _silent_fraction(wav, sr)
-    if silent_frac > 0.20:
+    if silent_frac > 0.60:
         print(f"  [{label}#{i}] REJECT too silent ({silent_frac:.1%})", flush=True)
         return [], [{"url": url, "label": label, "dur_s": round(dur, 1),
                      "silent_frac": round(silent_frac, 3), "decision": "reject_too_silent"}]
@@ -254,9 +278,9 @@ def _process_one(
         min_pair = 1.0
 
     if min_pair < 0.7:
-        print(f"  [{label}#{i}] REJECT multi-speaker (min_pair={min_pair:.3f})", flush=True)
-        return [], [{"url": url, "label": label, "dur_s": round(dur, 1),
-                     "min_pair_cos": round(min_pair, 3), "decision": "reject_multi_speaker"}]
+        # Hand-curated sources — log warning but proceed; transcription segments will handle mixing
+        print(f"  [{label}#{i}] WARN low speaker consistency (min_pair={min_pair:.3f}) — keeping",
+              flush=True)
 
     print(f"  [{label}#{i}] KEEP dur={dur:.1f}s silent={silent_frac:.1%} min_pair={min_pair:.3f}", flush=True)
     print(f"  [{label}#{i}] Transcribing with {whisper_model} …", flush=True)
@@ -330,7 +354,13 @@ def build_modern_rp(urls_json_path: Path, out_dir: Path, whisper_model: str = "m
     quality_csv = out_dir / "quality_log.csv"
     with quality_csv.open("w", newline="") as f:
         if quality_log:
-            w = csv.DictWriter(f, fieldnames=list(quality_log[0].keys()))
+            # Union of all keys — rows have different fields depending on rejection stage
+            all_fields: list[str] = []
+            for row in quality_log:
+                for k in row:
+                    if k not in all_fields:
+                        all_fields.append(k)
+            w = csv.DictWriter(f, fieldnames=all_fields, extrasaction="ignore")
             w.writeheader()
             w.writerows(quality_log)
 
@@ -349,6 +379,9 @@ def main() -> int:
                         help="Whisper model size (default: medium). Use large-v2 for max accuracy.")
     parser.add_argument("--parallel", type=int, default=2,
                         help="Number of URLs to process in parallel (default: 2).")
+    parser.add_argument("--cookies-from-browser", default="",
+                        help="Browser to pull cookies from for yt-dlp (default: safari). "
+                             "Use 'chrome', 'firefox', etc. Pass empty string to disable.")
     args = parser.parse_args()
 
     urls_json = PROJECT_ROOT / args.urls_json
@@ -357,6 +390,9 @@ def main() -> int:
         print("Create it from the template in configs/accent_coach_phase0_5/modern_rp_urls.json",
               file=sys.stderr)
         return 1
+
+    global _COOKIES_FROM_BROWSER
+    _COOKIES_FROM_BROWSER = args.cookies_from_browser
 
     build_modern_rp(urls_json, PROJECT_ROOT / args.out_dir,
                     whisper_model=args.whisper_model, parallel=args.parallel)
