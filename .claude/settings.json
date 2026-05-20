@@ -106,7 +106,8 @@
       "Bash(/Users/ivkrasovskii/model-voice-generator/.venv/bin/python -c \"import whisperx; print\\(whisperx.__file__\\)\")",
       "Bash(.venv/bin/ruff check *)",
       "Bash(HF_TOKEN=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 .venv/bin/python scripts/accent_coach_build_real_bc.py)",
-      "Bash(kill -9 58925)"
+      "Bash(kill -9 58925)",
+      "Bash(xargs -r kill -9)"
     ],
     "additionalDirectories": [
       "/private/tmp/openvoice_src"

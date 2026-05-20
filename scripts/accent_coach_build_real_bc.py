@@ -182,8 +182,10 @@ def _whisperx_transcribe_diarize(wav_path: Path, hf_token: str) -> list[dict]:
     )
 
     print("  [whisperx] diarizing …", flush=True)
+    import huggingface_hub
     from whisperx.diarize import DiarizationPipeline
-    diarize_model = DiarizationPipeline(use_auth_token=hf_token, device=device)
+    huggingface_hub.login(token=hf_token, add_to_git_credential=False)
+    diarize_model = DiarizationPipeline(device=device)
     diarize_segments = diarize_model(audio)
     result = whisperx.assign_word_speakers(diarize_segments, result)
 
