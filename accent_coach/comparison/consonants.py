@@ -45,19 +45,7 @@ def score_consonants(
     target_sr: int | None = None,
     target: SentenceAnalysis | None = None,
 ) -> float:
-    fricative_phonemes = [
-        v.phoneme for v in user.vowels  # re-use carrier; actually we need raw phonemes
-    ]
-    # The pipeline stores PhonemeInstance inside VowelFeatures; for fricatives we
-    # need the raw phoneme list from the alignment stage. This function accepts the
-    # user SentenceAnalysis, so we reconstruct from stops and vowels carriers.
-    # For the lightweight consonant scorer we fall back to RP references.
-
     scores: list[float] = []
-    # We can't easily iterate over fricatives without storing them separately; use
-    # vowel phoneme carrier as a placeholder. A real implementation would pass raw
-    # phonemes here. For Phase 0 we score only against RP references using the
-    # vowel-phoneme list to approximate — fricatives are scored lightly per spec.
     all_phonemes: list[PhonemeInstance] = (
         [v.phoneme for v in user.vowels] + [s.phoneme for s in user.stops]
     )

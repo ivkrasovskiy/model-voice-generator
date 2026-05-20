@@ -20,7 +20,7 @@ def lobanov_normalize(vowels: list[VowelFeatures]) -> list[tuple[float, float]]:
     f2s = np.array([v.f2 for v in vowels])
     z_f1 = (f1s - f1s.mean()) / (f1s.std() + 1e-9)
     z_f2 = (f2s - f2s.mean()) / (f2s.std() + 1e-9)
-    return list(zip(z_f1.tolist(), z_f2.tolist()))
+    return list(zip(z_f1.tolist(), z_f2.tolist(), strict=True))
 
 
 def lobanov_centroid(

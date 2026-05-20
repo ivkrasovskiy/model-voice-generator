@@ -32,8 +32,6 @@ def score_intonation(
         ref_c = np.array(template)
 
     alignment = dtw(user_c.reshape(-1, 1), ref_c.reshape(-1, 1), keep_internals=False)
-    # DTW distance normalised by path length
-    path_len = max(len(user_c), len(ref_c))
     norm_dist = float(alignment.normalizedDistance)
     score = 100.0 * math.exp(-norm_dist / _DECAY)
     return IntonationBreakdown(per_sentence_dtw=[norm_dist], score=score)

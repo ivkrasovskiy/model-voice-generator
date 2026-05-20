@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +24,7 @@ def main() -> None:
     parser.add_argument("--out-json", type=Path, required=True)
     args = parser.parse_args()
 
-    from accent_coach.calibration.sentences import CALIBRATION_SENTENCES, get_by_id
+    from accent_coach.calibration.sentences import get_by_id
     from accent_coach.comparison.scoring import compare
     from accent_coach.pipeline.features import analyse_audio
     from accent_coach.reference.rp_norms import get_rp_norms
@@ -48,7 +47,6 @@ def main() -> None:
     mean_f0 = float(
         np.mean([v.pitch_mean for v in user_analysis.vowels if v.pitch_mean > 70] or [120.0])
     )
-    from accent_coach.reference.rp_norms import get_rp_norms
     rp_norms = get_rp_norms(mean_f0)
 
     result = compare(

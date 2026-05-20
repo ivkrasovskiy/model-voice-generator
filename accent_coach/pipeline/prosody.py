@@ -91,6 +91,6 @@ def extract_stress_pattern(
 
     stressed = [
         (en / e_mean + du / d_mean + (pi / p_mean if pi > 70 else 0.0)) / 3 > 0.85
-        for en, du, pi in zip(energies, durs, pitches)
+        for en, du, pi in zip(energies, durs, pitches, strict=True)
     ]
     return stressed

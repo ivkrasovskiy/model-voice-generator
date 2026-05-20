@@ -5,10 +5,9 @@ import math
 import numpy as np
 
 from accent_coach.models import SentenceAnalysis, VowelFeatures
-from accent_coach.reference.normalize import lobanov_normalize
 from accent_coach.reference.rp_norms import get_rp_norms
 
-_SCALE = 1.5  # decay constant for normalized euclidean distance
+_SCALE = 0.7  # Why: chosen so a +200 Hz F1 shift (d≈0.4) scores ~56, satisfying spec acceptance gate
 
 
 def _score_vowel_pair(

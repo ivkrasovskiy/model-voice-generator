@@ -10,7 +10,7 @@ _PRE_MS = 20.0
 _POST_MS = 80.0
 _BURST_SEARCH_MS = 40.0
 _HF_LO = 2000
-_HF_HI = 8000
+_HF_HI = 7500  # Why: must stay < nyquist (8000 Hz at SR=16kHz) to avoid scipy boundary error
 _HOP_MS = 5.0
 
 

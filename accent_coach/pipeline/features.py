@@ -11,7 +11,6 @@ from accent_coach.models import SentenceAnalysis
 from accent_coach.pipeline.alignment import align_audio
 from accent_coach.pipeline.formants import extract_vowel_features
 from accent_coach.pipeline.prosody import (
-    compute_npvi,
     extract_pitch_contour,
     extract_stress_pattern,
     extract_syllable_durations,

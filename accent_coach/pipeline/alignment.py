@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
-
 from accent_coach.models import PhonemeInstance
 
 # ARPABET → IPA mapping (subset covering English phoneme inventory)
@@ -21,7 +19,7 @@ ARPABET_TO_IPA: dict[str, str] = {
 }
 
 IPA_VOWELS = frozenset(
-    "æ ɑː ɒ ɔː ʊ uː ɪ iː ɛ ʌ ɜː eɪ aɪ ɔɪ aʊ əʊ ə ɐ".split()
+    ["æ", "ɑː", "ɒ", "ɔː", "ʊ", "uː", "ɪ", "iː", "ɛ", "ʌ", "ɜː", "eɪ", "aɪ", "ɔɪ", "aʊ", "əʊ", "ə", "ɐ"]
 )
 
 # Minimal CMU stress dict for calibration sentence vocabulary.
@@ -33,8 +31,7 @@ _STRESS_EXCEPTIONS: dict[str, set[int]] = {
     "although": {1}, "among": {1}, "around": {1}, "arrived": {1},
     "away": {1}, "before": {1}, "belong": {1}, "below": {1},
     "beside": {1}, "between": {1}, "beyond": {1}, "begin": {1},
-    "behind": {1}, "believe": {1}, "below": {1}, "beneath": {1},
-    "beside": {1}, "between": {1}, "beyond": {1},
+    "behind": {1}, "believe": {1}, "beneath": {1},
     "photography": {1}, "photographer": {1}, "photographic": {2},
     "economy": {1}, "economic": {2}, "economics": {2},
     "democracy": {1}, "democratic": {2},
@@ -107,7 +104,7 @@ def _mms_align(
     duration = waveform.shape[-1] / bundle.sample_rate
     n = len(alignment)
     instances: list[PhonemeInstance] = []
-    for i, (token_idx, _score) in enumerate(zip(alignment, alignment)):
+    for i, (_token_idx, _score) in enumerate(zip(alignment, alignment, strict=True)):
         arpabet = tokens[i].upper()
         ipa = ARPABET_TO_IPA.get(arpabet, arpabet)
         start = float(i) / n * duration

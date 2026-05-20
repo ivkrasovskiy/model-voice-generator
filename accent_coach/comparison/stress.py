@@ -18,7 +18,7 @@ def score_stress(
         if n == 0:
             return 50.0
         matches = sum(
-            u == t for u, t in zip(user.stress_pattern[:n], target.stress_pattern[:n])
+            u == t for u, t in zip(user.stress_pattern[:n], target.stress_pattern[:n], strict=False)
         )
         return 100.0 * matches / n
 
