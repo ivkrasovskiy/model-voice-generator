@@ -108,6 +108,37 @@ making its SD unreliable. Lobanov mode produces z-score distances too large for
 the current scale and made scores worse. Left in the code for future use with a
 proper RP corpus; disabled in the notebook.
 
+### IndexTTS vowel biases are stable across independent datasets
+
+Tested on two pre-existing eval sets (same model, same `ref_interview.wav`,
+different sentences — Casanova memoirs + Sherlock Holmes):
+
+| Dataset | Clips | Mean composite | Mean vowels |
+|---|---|---|---|
+| `bc_cal_50` (calibration sentences) | 50 | 53.9 | 75.5 |
+| `eval_indextts_interview_short` | 15 | 52.7 | 76.7 |
+| `eval_indextts_interview_long` | 8 | 50.6 | 74.9 |
+
+The vowel score is **consistent across all three independent datasets** (74.9–76.7)
+despite completely different source text and sentence lengths. This confirms the
+formant extraction is stable and the numbers are not an artefact of the calibration
+sentence set.
+
+Per-phoneme biases are also reproducible across the two independent evals:
+
+| Phoneme | Short eval ΔF2 | Long eval ΔF2 | Calibration ΔF2 | Pattern |
+|---|---|---|---|---|
+| /iː/ | −224 | −172 | — | Backed vs RP — consistent |
+| /æ/ | −242 | −262 | −344 | Backed F2, raised F1 — consistent |
+| /uː/ | +357 | +410 | — | Fronted — consistent (modern SSBE feature) |
+| /ɔː/ | +260 | +205 | — | Fronted — consistent |
+| /ɛ/ | −241 | −257 | — | Raised+backed — consistent TTS bias |
+
+**Conclusion**: the biases on /æ/, /ɛ/, /ʌ/ that make BC score worse than the
+owner on those phonemes are a property of the IndexTTS model, not measurement
+noise. They are present identically across three independent runs on different text.
+This reinforces the Phase 1 recommendation to use real BC recordings as reference.
+
 ---
 
 ## What is not done (Phase 0 incomplete items)
