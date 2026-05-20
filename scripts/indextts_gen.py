@@ -28,7 +28,7 @@ sys.path.insert(0, str(INDEXTTS_ROOT))
 import soundfile as sf
 from indextts.infer_v2 import IndexTTS2
 
-DEFAULT_REF = str(PROJECT_ROOT / "tts_output/ref_narrator.wav")
+DEFAULT_REF = str(PROJECT_ROOT / "tts_output/ref_interview.wav")
 DEFAULT_PHRASES = str(PROJECT_ROOT / "tts_output/cross_eval_50/eval_short.csv")
 DEFAULT_OUT = str(PROJECT_ROOT / "tts_output/eval_indextts_v2")
 
