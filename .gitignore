@@ -4,6 +4,7 @@
 .ruff_cache
 .codegraph
 .venv_indextts
+.rtk
 .claude/scheduled_tasks.*
 checkpoints
 openvoice_checkpoints

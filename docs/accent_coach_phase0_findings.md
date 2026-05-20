@@ -2,7 +2,9 @@
 
 > **Related**: execution plan with step-by-step status →
 > [`docs/accent_coach_plan.md`](accent_coach_plan.md)  
-> Full feature spec → [`docs/accent_coach_technical_spec.md`](accent_coach_technical_spec.md)
+> Full feature spec → [`docs/accent_coach_technical_spec.md`](accent_coach_technical_spec.md)  
+> Root-cause follow-up (vowel score equality) →
+> [`docs/accent_coach_phase0_5_plan.md`](accent_coach_phase0_5_plan.md)
 
 Status as of 2026-05-20. Written after running all 50 calibration sentences
 through the full pipeline with real recordings (owner) and IndexTTS-2 BC synth.
