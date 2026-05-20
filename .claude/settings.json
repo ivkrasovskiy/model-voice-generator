@@ -101,7 +101,8 @@
       "Bash(tee logs/indextts_interview_long.log)",
       "Bash(unset VIRTUAL_ENV)",
       "Bash(/Users/ivkrasovskii/model-voice-generator/vendor/index-tts/.venv/bin/python /Users/ivkrasovskii/model-voice-generator/scripts/indextts_smoke_test.py)",
-      "Bash(uv add *)"
+      "Bash(uv add *)",
+      "Bash(pgrep -q \"indextts_gen\")"
     ],
     "additionalDirectories": [
       "/private/tmp/openvoice_src"
