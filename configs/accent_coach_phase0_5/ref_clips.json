@@ -1,0 +1,7 @@
+[
+    {"name": "interview_main",  "path": "tts_output/ref_interview.wav"},
+    {"name": "d1_segment_a",    "path": "tts_output/real_bc_corpus/clips/XXXX.wav"},
+    {"name": "d1_segment_b",    "path": "tts_output/real_bc_corpus/clips/YYYY.wav"},
+    {"name": "audiobook_a",     "path": "TBD"},
+    {"name": "audiobook_b",     "path": "TBD"}
+]
