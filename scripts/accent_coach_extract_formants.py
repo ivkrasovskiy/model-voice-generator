@@ -127,6 +127,8 @@ def main() -> int:
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--source-label", required=True)
+    parser.add_argument("--label-from-manifest", action="store_true",
+                        help="Append manifest 'label' field to source_label (e.g. modern_rp_bbc)")
     args = parser.parse_args()
 
     manifest_path = args.manifest if args.manifest.is_absolute() else PROJECT_ROOT / args.manifest
@@ -137,7 +139,8 @@ def main() -> int:
         return 1
 
     print(f"Extracting formants: {manifest_path.name} → {out_csv.name}  label={args.source_label}")
-    extract_formants(manifest_path, out_csv, args.source_label)
+    extract_formants(manifest_path, out_csv, args.source_label,
+                     label_from_manifest=args.label_from_manifest)
     return 0
 
 
