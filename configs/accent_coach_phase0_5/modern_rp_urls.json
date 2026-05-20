@@ -1,6 +1,7 @@
 [
-    {"label": "bbc",     "url": "TODO", "trim_head_s": 15, "trim_tail_s": 15},
-    {"label": "bbc",     "url": "TODO", "trim_head_s": 15, "trim_tail_s": 15},
-    {"label": "lindsey", "url": "TODO", "trim_head_s": 15, "trim_tail_s": 15},
-    {"label": "lindsey", "url": "TODO", "trim_head_s": 15, "trim_tail_s": 15}
+    {"label": "bbc",     "url": "https://www.youtube.com/watch?v=vxxXQN76jDE", "trim_head_s": 54, "trim_tail_s": 15},
+    {"label": "fry",     "url": "https://www.youtube.com/watch?v=IporlmXXDeY", "start_s": 124, "end_s": 2597},
+    {"label": "fry",     "url": "https://www.youtube.com/watch?v=uBI4Smdjvps", "start_s": 19,  "end_s": 2691},
+    {"label": "lindsey", "url": "https://www.youtube.com/watch?v=Y5jD5SyH3EM", "trim_head_s": 15, "trim_tail_s": 15},
+    {"label": "lindsey", "url": "https://www.youtube.com/watch?v=U37hX8NPgjQ", "trim_head_s": 15, "trim_tail_s": 15}
 ]

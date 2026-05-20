@@ -85,7 +85,18 @@ def _run_cmd(cmd: list[str]) -> None:
         raise RuntimeError(f"Command failed: {' '.join(cmd)}\nSTDERR: {result.stderr[-2000:]}")
 
 
-def _download_and_convert(url: str, out_path: Path, head_trim: float, tail_trim: float) -> Path:
+def _download_and_convert(
+    url: str,
+    out_path: Path,
+    head_trim: float,
+    tail_trim: float,
+    start_s: float | None = None,
+    end_s: float | None = None,
+) -> Path:
+    """Download, trim, and convert to 16 kHz mono WAV.
+
+    If start_s/end_s are given they take precedence over head_trim/tail_trim.
+    """
     tmp = out_path.parent / f"{out_path.stem}.tmp"
     _run_cmd(["yt-dlp", "-x", "--audio-format", "wav", "-o", str(tmp), url])
 
@@ -95,15 +106,18 @@ def _download_and_convert(url: str, out_path: Path, head_trim: float, tail_trim:
         raise RuntimeError(f"yt-dlp produced no output for {url}")
     actual_tmp = candidates[0]
 
-    # Get duration
-    import librosa
-    dur = librosa.get_duration(path=str(actual_tmp))
-    end_t = max(dur - tail_trim, head_trim + 10.0)
+    if start_s is not None and end_s is not None:
+        ss, to = start_s, end_s
+    else:
+        import librosa
+        dur = librosa.get_duration(path=str(actual_tmp))
+        ss = head_trim
+        to = max(dur - tail_trim, head_trim + 10.0)
 
     _run_cmd([
         "ffmpeg", "-y",
-        "-ss", str(head_trim),
-        "-to", str(end_t),
+        "-ss", str(ss),
+        "-to", str(to),
         "-i", str(actual_tmp),
         "-ac", "1", "-ar", "16000", "-sample_fmt", "s16",
         str(out_path),
@@ -197,6 +211,8 @@ def build_modern_rp(urls_json_path: Path, out_dir: Path) -> None:
         label, url = entry["label"], entry["url"]
         head_trim = entry.get("trim_head_s", 15)
         tail_trim = entry.get("trim_tail_s", 15)
+        start_s = entry.get("start_s", None)
+        end_s = entry.get("end_s", None)
 
         label_raw_dir = out_dir / label / "raw"
         label_clips_dir = out_dir / label / "clips"
@@ -204,10 +220,12 @@ def build_modern_rp(urls_json_path: Path, out_dir: Path) -> None:
         label_clips_dir.mkdir(parents=True, exist_ok=True)
 
         raw_path = label_raw_dir / f"{i}.wav"
-        print(f"\n=== [{label}] Downloading {url} ===", flush=True)
+        trim_desc = (f"start={start_s}s end={end_s}s" if start_s is not None
+                     else f"trim_head={head_trim}s trim_tail={tail_trim}s")
+        print(f"\n=== [{label}] Downloading {url}  ({trim_desc}) ===", flush=True)
 
         try:
-            _download_and_convert(url, raw_path, head_trim, tail_trim)
+            _download_and_convert(url, raw_path, head_trim, tail_trim, start_s, end_s)
         except Exception as e:
             print(f"  SKIP download failed: {e}", flush=True)
             quality_log.append({"url": url, "label": label, "decision": f"reject_download_failed: {e}"})
