@@ -11,13 +11,17 @@ Phase 0 ends when the validation experiments below pass on real audio.
 
 ---
 
-## Current status — 2026-05-20
+## Current status — 2026-05-21
 
-> **Findings doc**: [`docs/accent_coach_phase0_findings.md`](accent_coach_phase0_findings.md)
-> — read this before continuing work. It records what works, what is broken,
-> and what the per-phoneme scores actually say.
+> **Latest findings**: [`docs/accent_coach_phase0_7_findings.md`](accent_coach_phase0_7_findings.md)
+> (Phase 0.7) — modern RP norms in place, bench run complete. Read this first.
+> Earlier findings: [`docs/accent_coach_phase0_findings.md`](accent_coach_phase0_findings.md),
+> [`docs/accent_coach_phase0_5_findings.md`](accent_coach_phase0_5_findings.md),
+> [`docs/accent_coach_phase0_6_findings.md`](accent_coach_phase0_6_findings.md).
 
-**Phase 0 acceptance gate: NOT MET.**
+**Phase 0 acceptance gate: NOT MET.** Vowel scoring validated (BC gets 79/100
+on vowels against modern RP). Aspiration scorer miscalibrated — real BC gets
+13.4; needs VOT detection fix before the B − C gap is meaningful.
 
 | Step | Status |
 |---|---|

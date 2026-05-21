@@ -80,3 +80,43 @@ def score_vowels(
             continue
         scores.append(_score_pair(v.f1, v.f2, ref[0], ref[1], speaker_params, effective_ref_params))
     return float(np.mean(scores)) if scores else 0.0
+
+
+def score_vowels_piecewise(
+    user_f1f2: dict[str, tuple[float, float]],
+    ref_f1f2: dict[str, tuple[float, float]],
+    sigma_rp: dict[str, float],
+) -> dict:
+    """Piecewise-linear vowel score tied to within-RP variance (Phase 0.8).
+
+    Replaces the exponential-decay composite for bench evaluation.
+    Accepts pre-normalised (f1, f2) pairs so any Phase 0.8 normalisation
+    can be applied before calling.
+
+    Args:
+        user_f1f2:  {phoneme: (f1, f2)} for the test speaker
+        ref_f1f2:   {phoneme: (f1, f2)} for the modern-RP centroid
+        sigma_rp:   {phoneme: sigma} — mean within-RP cluster distance,
+                    computed by cluster_eval.per_phoneme_sigma_rp
+
+    Returns:
+        {"per_phoneme": {phoneme: score}, "composite": float}
+    """
+    per_phoneme: dict[str, float] = {}
+    for phoneme, (uf1, uf2) in user_f1f2.items():
+        ref = ref_f1f2.get(phoneme)
+        sigma = sigma_rp.get(phoneme)
+        if ref is None or sigma is None or sigma <= 0:
+            continue
+        d = math.sqrt((uf1 - ref[0]) ** 2 + (uf2 - ref[1]) ** 2)
+        if d <= sigma:
+            score = 100.0
+        elif d <= 2 * sigma:
+            score = 100.0 - 30.0 * (d - sigma) / sigma
+        elif d <= 4 * sigma:
+            score = 70.0 - 40.0 * (d - 2 * sigma) / (2 * sigma)
+        else:
+            score = 30.0
+        per_phoneme[phoneme] = round(score, 1)
+    composite = float(np.mean(list(per_phoneme.values()))) if per_phoneme else 0.0
+    return {"per_phoneme": per_phoneme, "composite": round(composite, 1)}

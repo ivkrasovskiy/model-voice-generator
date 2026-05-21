@@ -1,5 +1,7 @@
 # Accent Coach — Phase 0.5 Findings
 
+> **SUPERSEDED** by Phase 0.6 ([accent_coach_phase0_6_findings.md](accent_coach_phase0_6_findings.md)). The raw-Hz distance interpretation here is misleading for L2 speakers because it ignores vowel-space compression.
+
 > **Status**: complete. Measurement-only — no scoring code modified.
 > **Related**: [`accent_coach_phase0_5_plan.md`](accent_coach_phase0_5_plan.md),
 > [`accent_coach_phase0_5_verdicts.json`](accent_coach_phase0_5_verdicts.json),

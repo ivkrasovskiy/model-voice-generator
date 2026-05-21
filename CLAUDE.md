@@ -150,6 +150,28 @@ context.
 - Generated WAVs and large intermediates live under `tts_output/`. The repo
   ships scoring CSVs only; raw audio is regenerated on demand.
 
+## For spawned agents (Explore, Plan, general-purpose, etc.)
+
+Sub-agents start cold and must respect the tooling already set up here:
+
+- **Python execution**: use `.venv/bin/python` or `uv run python` for the
+  scoring stack; use `vendor/index-tts/.venv/bin/python` for anything that
+  touches IndexTTS-2. Never `python3` bare, never `pip install`.
+- **uv only** for dependency changes (`uv add`, `uv sync`). Do not edit
+  `pyproject.toml` then run `pip`.
+- **RTK prefix every shell command** — `rtk git status`, `rtk grep ...`,
+  `rtk ls ...`, `rtk pytest ...`. The hook rewrites them; RTK passes through
+  if no filter exists, so it is always safe. Token savings are 60-90% on
+  most ops — meaningful for sub-agents whose context fills fast.
+- **CodeGraph is initialised** (`.codegraph/` exists). For symbol lookup,
+  callers/callees, and impact analysis prefer `codegraph_search`,
+  `codegraph_callers`, `codegraph_callees`, `codegraph_impact`,
+  `codegraph_context`, `codegraph_node` over grep / find scans. Falls back
+  to grep only when the symbol is not indexed (e.g. fresh code).
+- **Do not touch** `vendor/`, `tts_output/eval_indextts_v2/`,
+  `tts_output/ref_interview.wav` — locked baseline artifacts. If a sub-agent
+  is asked to "look around" it should treat these as read-only.
+
 <!-- rtk-instructions v2 -->
 # RTK (Rust Token Killer) - Token-Optimized Commands
 
