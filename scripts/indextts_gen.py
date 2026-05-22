@@ -43,14 +43,34 @@ def main() -> int:
     parser.add_argument("--ref-audio", default=DEFAULT_REF)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--label", default="indextts_v2")
+    # Generation quality knobs (Track C sweep)
+    parser.add_argument("--temperature", type=float, default=0.8,
+                        help="GPT sampling temperature (default 0.8; lower = more conservative)")
+    parser.add_argument("--top-p", type=float, default=0.8,
+                        help="Nucleus sampling top-p (default 0.8)")
+    parser.add_argument("--top-k", type=int, default=30,
+                        help="Top-k sampling (default 30)")
+    parser.add_argument("--num-beams", type=int, default=3,
+                        help="Beam search width (default 3; 1 = pure sampling)")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    gen_kwargs = {
+        "temperature": args.temperature,
+        "top_p": args.top_p,
+        "top_k": args.top_k,
+        "num_beams": args.num_beams,
+    }
+    defaults = {"temperature": 0.8, "top_p": 0.8, "top_k": 30, "num_beams": 3}
+    non_default = {k: v for k, v in gen_kwargs.items() if v != defaults[k]}
+
     print(f"Loading IndexTTS-2 on {args.device}...")
     tts = IndexTTS2(cfg_path=CFG_PATH, model_dir=MODEL_DIR, device=args.device)
     print(f"  Model loaded. Reference: {Path(args.ref_audio).name}")
+    if non_default:
+        print(f"  Non-default gen params: {non_default}")
 
     with open(args.phrases_csv) as f:
         phrases = list(csv.DictReader(f))
@@ -64,7 +84,8 @@ def main() -> int:
         if out_path.exists():
             print("  already exists, skipping")
         else:
-            tts.infer(spk_audio_prompt=args.ref_audio, text=prompt, output_path=str(out_path))
+            tts.infer(spk_audio_prompt=args.ref_audio, text=prompt,
+                      output_path=str(out_path), **gen_kwargs)
         info = sf.info(str(out_path))
         print(f"  → {out_path.name} ({info.duration:.1f}s, sr={info.samplerate})")
         manifest.append({

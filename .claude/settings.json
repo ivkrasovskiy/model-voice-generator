@@ -122,11 +122,14 @@
       "Write",
       "Bash(PYTHONPATH=/Users/ivkrasovskii/model-voice-generator .venv/bin/python scripts/accent_coach_bench.py --manifest tts_output/accent_coach/bench/phase0_7_manifest.csv --run-id phase0_7)",
       "Bash(PYTHONPATH=/Users/ivkrasovskii/model-voice-generator .venv/bin/python -c ' *)",
-      "Bash(mkdir -p tts_output/accent_coach/phase0_8)"
+      "Bash(mkdir -p tts_output/accent_coach/phase0_8)",
+      "Bash(sort -k5 -rn)",
+      "Bash(rm -f /Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_9/variants/A1/formants.csv \\\\ *)"
     ],
     "additionalDirectories": [
       "/private/tmp/openvoice_src",
-      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach"
+      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach",
+      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_9/variants/A1"
     ]
   }
 }
