@@ -29,8 +29,11 @@ INDEXTTS_ROOT = PROJECT_ROOT / "vendor" / "index-tts"
 
 sys.path.insert(0, str(INDEXTTS_ROOT))
 
+import torch
 import soundfile as sf
 from indextts.infer_v2 import IndexTTS2
+
+_DEFAULT_DEVICE = "cpu"  # MPS unsupported: bigvgan alias_free conv_transpose1d fails >65536 channels
 
 # Hard-coded baseline thresholds — derived from the 2026-05-19 zero-shot eval.
 # Real baseline ECAPA was 0.78-0.85 across both clips. IndexTTS-2 has internal
@@ -66,8 +69,8 @@ def main() -> int:
     tmp_dir = Path(tempfile.mkdtemp(prefix="indextts_smoke_"))
     print(f"Smoke test workspace: {tmp_dir}")
 
-    print(f"Loading IndexTTS-2 from {INDEXTTS_ROOT}...")
-    tts = IndexTTS2(cfg_path=CFG_PATH, model_dir=MODEL_DIR, device="cpu")
+    print(f"Loading IndexTTS-2 from {INDEXTTS_ROOT} (device={_DEFAULT_DEVICE})...")
+    tts = IndexTTS2(cfg_path=CFG_PATH, model_dir=MODEL_DIR, device=_DEFAULT_DEVICE)
 
     manifest = []
     for slug in SMOKE_SLUGS:

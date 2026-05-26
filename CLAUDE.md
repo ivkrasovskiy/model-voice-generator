@@ -7,8 +7,9 @@ Guidance for Claude Code when working in this repo.
 Generate Benedict Cumberbatch's voice from text. Current production model is
 **IndexTTS-2 zero-shot** with a 14 s interview reference clip
 (`tts_output/ref_interview.wav`, sourced from
-[youtu.be/cHmkAStZBkc](https://youtu.be/cHmkAStZBkc) at 4:47-5:01). No
-fine-tuning involved.
+[youtu.be/cHmkAStZBkc](https://youtu.be/cHmkAStZBkc) at 4:47-5:01) and
+**`num_beams=5`** (Phase 0.9 finding — raises H4 Bark piecewise from 74.6 → 82.1).
+No fine-tuning involved.
 
 For the full backstory — F5-TTS / XTTS-v2 / OpenVoice / F5R-TTS / centroid
 experiments, dataset construction, why each approach failed — see
@@ -81,7 +82,8 @@ cd ../.. && vendor/index-tts/.venv/bin/python scripts/indextts_smoke_test.py
 ```bash
 vendor/index-tts/.venv/bin/python scripts/indextts_gen.py \
     --phrases-csv tts_output/cross_eval_50/eval_short.csv \
-    --out-dir tts_output/my_run
+    --out-dir tts_output/my_run \
+    --num-beams 5
 ```
 
 **Build a new reference clip from a YouTube URL**:

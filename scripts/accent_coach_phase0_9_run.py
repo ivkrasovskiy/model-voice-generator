@@ -40,7 +40,13 @@ import soundfile as sf
 from accent_coach.comparison.vowels import score_vowels_piecewise
 from accent_coach.diagnostics.bark_distance import bark_transform
 from accent_coach.diagnostics.cluster_eval import per_phoneme_sigma_rp
-from accent_coach.reference.rp_norms import RP_VOWEL_F1_F2_MALE_LEGACY
+from accent_coach.pipeline.experiment import (
+    build_centroids_from_formants,
+    load_baseline_centroids as _load_baseline_centroids_from_module,
+    score_posthoc_clips,
+    generate_clips as _experiment_generate_clips,
+    extract_formants as _experiment_extract_formants,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -257,43 +263,19 @@ def _gen_param_flags(gen_params: dict) -> list[str]:
 
 
 def generate_clips(variant_id: str, ref_path: Path, clips_dir: Path, cfg: dict) -> Path:
-    """Run IndexTTS-2 on CAL_CSV (50 phrases). Returns manifest path.
-
-    If cfg has 'cal_manifest', skips generation and returns that path directly
-    (used for A1 which reuses the existing bc_cal_50 clips).
-    Passes any gen_params from cfg as CLI flags to indextts_gen.py.
-    """
+    """Run IndexTTS-2 on CAL_CSV (50 phrases). Returns manifest path."""
     # A1 special case: reuse pre-existing bc_cal_50 clips
     if "cal_manifest" in cfg:
         cal_manifest = PROJECT_ROOT / cfg["cal_manifest"]
         print(f"  [{variant_id}] generation: reusing {cal_manifest.parent.name} (no new clips needed)")
         return cal_manifest
-
-    manifest_path = clips_dir / "manifest.json"
-    n_expected = sum(1 for _ in CAL_CSV.open()) - 1  # subtract header
-    if manifest_path.exists():
-        existing = json.loads(manifest_path.read_text())
-        if len(existing) == n_expected:
-            print(f"  [{variant_id}] generation: {len(existing)} clips already exist, skipping")
-            return manifest_path
-        print(f"  [{variant_id}] generation: partial manifest ({len(existing)}/{n_expected}), re-generating")
-
-    clips_dir.mkdir(parents=True, exist_ok=True)
-    extra_flags = _gen_param_flags(cfg.get("gen_params", {}))
-    print(f"  [{variant_id}] generating {n_expected} cal phrases with ref={ref_path.name}"
-          + (f"  params={extra_flags}" if extra_flags else "") + "…")
-    r = subprocess.run(
-        [str(INDEXTTS_PYTHON), "scripts/indextts_gen.py",
-         "--phrases-csv", str(CAL_CSV),
-         "--out-dir", str(clips_dir),
-         "--ref-audio", str(ref_path),
-         "--label", f"synth_BC_{variant_id}",
-         *extra_flags],
-        cwd=str(PROJECT_ROOT),
+    return _experiment_generate_clips(
+        phrases_csv=CAL_CSV,
+        ref_audio=ref_path,
+        out_dir=clips_dir,
+        gen_params=cfg.get("gen_params", {}),
+        label=f"synth_BC_{variant_id}",
     )
-    if r.returncode != 0:
-        raise RuntimeError(f"indextts_gen.py failed for variant {variant_id}")
-    return manifest_path
 
 
 # ---------------------------------------------------------------------------
@@ -301,23 +283,12 @@ def generate_clips(variant_id: str, ref_path: Path, clips_dir: Path, cfg: dict) 
 # ---------------------------------------------------------------------------
 
 def extract_formants(variant_id: str, manifest_path: Path, var_dir: Path) -> Path:
-    """Run accent_coach_extract_formants.py. Returns formants CSV path."""
-    formants_csv = var_dir / "formants.csv"
-    if formants_csv.exists():
-        print(f"  [{variant_id}] formants: already extracted, skipping")
-        return formants_csv
-
-    print(f"  [{variant_id}] extracting formants…")
-    r = subprocess.run(
-        [str(PROJECT_PYTHON), "scripts/accent_coach_extract_formants.py",
-         "--manifest", str(manifest_path),
-         "--out", str(formants_csv),
-         "--source-label", "synth_BC"],
-        cwd=str(PROJECT_ROOT),
+    """Extract vowel formants. Returns formants CSV path."""
+    return _experiment_extract_formants(
+        manifest=manifest_path,
+        out_csv=var_dir / "formants.csv",
+        source_label="synth_BC",
     )
-    if r.returncode != 0:
-        raise RuntimeError(f"accent_coach_extract_formants.py failed for variant {variant_id}")
-    return formants_csv
 
 
 # ---------------------------------------------------------------------------
@@ -326,41 +297,12 @@ def extract_formants(variant_id: str, manifest_path: Path, var_dir: Path) -> Pat
 
 def build_synth_bc_centroids(formants_csv: Path) -> dict[str, dict]:
     """Compute per-phoneme mean F1/F2 from formant CSV (duration≥50ms filter)."""
-    rows: list[dict] = []
-    with formants_csv.open() as f:
-        for row in csv.DictReader(f):
-            try:
-                if float(row["duration_s"]) >= 0.050:
-                    rows.append(row)
-            except (ValueError, KeyError):
-                continue
-
-    by_phoneme: dict[str, list[tuple[float, float]]] = {}
-    for row in rows:
-        ph = row["phoneme"]
-        try:
-            f1, f2 = float(row["F1"]), float(row["F2"])
-        except (ValueError, KeyError):
-            continue
-        by_phoneme.setdefault(ph, []).append((f1, f2))
-
-    centroids: dict[str, dict] = {}
-    for ph, pairs in by_phoneme.items():
-        f1_mean = float(np.mean([p[0] for p in pairs]))
-        f2_mean = float(np.mean([p[1] for p in pairs]))
-        centroids[ph] = {"f1": round(f1_mean, 1), "f2": round(f2_mean, 1), "n": len(pairs)}
-    return centroids
+    return build_centroids_from_formants(formants_csv)
 
 
 def _load_baseline_centroids() -> dict:
     """Load phase0_7 speaker_centroids.json and add deterding pseudo-speaker."""
-    with BASELINE_CENTROIDS.open() as f:
-        raw = json.load(f)
-    for phoneme, f1f2 in RP_VOWEL_F1_F2_MALE_LEGACY.items():
-        if phoneme not in raw:
-            raw[phoneme] = {}
-        raw[phoneme]["deterding"] = {"f1": f1f2[0], "f2": f1f2[1], "n": 0}
-    return raw
+    return _load_baseline_centroids_from_module()
 
 
 def score_h4_bark(variant_id: str, new_synth_bc: dict[str, dict] | None, var_dir: Path) -> dict:
@@ -452,45 +394,8 @@ def score_h4_bark(variant_id: str, new_synth_bc: dict[str, dict] | None, var_dir
 
 
 # ---------------------------------------------------------------------------
-# Step 6: WER / ECAPA / DNSMOS
+# Step 6: WER / ECAPA / DNSMOS (delegates to experiment.py singletons)
 # ---------------------------------------------------------------------------
-
-# Lazy singletons — loaded on first call, reused across variants
-_WHISPER = None
-_ECAPA   = None
-_DNSMOS  = None
-# Fixed BC reference embedding for ECAPA (per-clip real-BC refs absent; use narrator clip)
-_ECAPA_REF_EMB: np.ndarray | None = None
-
-
-def _load_models():
-    global _WHISPER, _ECAPA, _DNSMOS
-    if _WHISPER is None:
-        from lib.transcribe import load_whisper
-        print("  Loading Whisper large-v3…")
-        _WHISPER = load_whisper("large-v3", device="cpu")
-    if _ECAPA is None:
-        from lib.identity import load_ecapa
-        print("  Loading ECAPA-TDNN…")
-        _ECAPA = load_ecapa(device="cpu")
-    if _DNSMOS is None:
-        from lib.metrics import load_dnsmos
-        print("  Loading DNSMOS…")
-        _DNSMOS = load_dnsmos()
-
-
-def _load_ecapa_ref() -> np.ndarray:
-    global _ECAPA_REF_EMB
-    if _ECAPA_REF_EMB is not None:
-        return _ECAPA_REF_EMB
-    from lib.identity import embed_file
-    emb = embed_file(str(ECAPA_REF), _ECAPA)
-    if emb is None:
-        raise RuntimeError(f"Failed to embed ECAPA reference: {ECAPA_REF}")
-    _ECAPA_REF_EMB = emb
-    print(f"  ECAPA ref: {ECAPA_REF.name}  dim={emb.shape[0]}")
-    return _ECAPA_REF_EMB
-
 
 def _ensure_eval_clips(variant_id: str, ref_path: Path, eval_clips_dir: Path,
                        gen_params: dict | None = None) -> Path:
@@ -520,96 +425,11 @@ def _ensure_eval_clips(variant_id: str, ref_path: Path, eval_clips_dir: Path,
 
 def score_posthoc(variant_id: str, ref_path: Path, var_dir: Path,
                   gen_params: dict | None = None) -> dict:
-    """Generate 15 eval clips then score WER/ECAPA/DNSMOS. Returns aggregate means.
-
-    Uses a separate eval_clips/ subdirectory so cal clips (for formants) stay clean.
-    ECAPA compares against ref_narrator.wav (fixed BC identity ref; per-clip refs absent).
-    """
+    """Generate 15 eval clips then score WER/ECAPA/DNSMOS via experiment.score_posthoc_clips."""
     eval_clips_dir = var_dir / "eval_clips"
-    posthoc_csv = var_dir / "posthoc_scores.csv"
-    if posthoc_csv.exists():
-        print(f"  [{variant_id}] posthoc: already scored, skipping")
-        existing = list(csv.DictReader(posthoc_csv.open()))
-        if existing:
-            wers   = [float(r["wer"])        for r in existing if r.get("wer")        not in ("", "nan")]
-            ecapas = [float(r["ecapa_sim"])   for r in existing if r.get("ecapa_sim")  not in ("", "nan")]
-            dnsmos = [float(r["dnsmos_ovr"])  for r in existing if r.get("dnsmos_ovr") not in ("", "nan")]
-            return {
-                "WER": round(float(np.mean(wers)),   4) if wers   else float("nan"),
-                "ECAPA": round(float(np.mean(ecapas)), 4) if ecapas else float("nan"),
-                "DNSMOS_OVR": round(float(np.mean(dnsmos)), 4) if dnsmos else float("nan"),
-            }
-
-    # Generate eval clips if not present
-    manifest_path = _ensure_eval_clips(variant_id, ref_path, eval_clips_dir, gen_params)
-
-    _load_models()
-    ecapa_ref_emb = _load_ecapa_ref()
-
-    from lib.identity import cosine, embed_wav
-    from lib.metrics import compute_dnsmos, compute_wer
-
-    manifest = json.loads(manifest_path.read_text())
-
-    rows = []
-    for entry in manifest:
-        wav_path = Path(entry["wav_path"])
-        if not wav_path.exists():
-            print(f"    SKIP missing: {wav_path.name}")
-            rows.append({**entry, "wer": float("nan"), "ecapa_sim": float("nan"), "dnsmos_ovr": float("nan")})
-            continue
-
-        audio, sr = sf.read(str(wav_path))
-        if audio.ndim > 1:
-            audio = audio.mean(axis=1)
-        audio = audio.astype(np.float32)
-
-        wer = float("nan")
-        try:
-            wer, hyp = compute_wer(entry["prompt"], audio, sr, _WHISPER)
-            if wer > 0.1:
-                print(f"    WER={wer:.3f} heard: {hyp[:80]!r}")
-        except Exception as e:
-            print(f"    WER failed for {entry['slug']}: {e}")
-
-        ecapa_sim = float("nan")
-        try:
-            gen_emb = embed_wav(audio, sr, _ECAPA)
-            ecapa_sim = cosine(ecapa_ref_emb, gen_emb)
-        except Exception as e:
-            print(f"    ECAPA failed for {entry['slug']}: {e}")
-
-        dnsmos_ovr = float("nan")
-        try:
-            mos = compute_dnsmos(audio, sr, _DNSMOS)
-            dnsmos_ovr = mos["ovr"]
-        except Exception as e:
-            print(f"    DNSMOS failed for {entry['slug']}: {e}")
-
-        rows.append({
-            "slug": entry["slug"],
-            "prompt": entry["prompt"],
-            "wer": round(wer, 4),
-            "ecapa_sim": round(ecapa_sim, 4),
-            "dnsmos_ovr": round(dnsmos_ovr, 4),
-            "wav_path": str(wav_path),
-        })
-        print(f"    {entry['slug']}: wer={wer:.3f} ecapa={ecapa_sim:.4f} dnsmos={dnsmos_ovr:.2f}")
-
-    with posthoc_csv.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=rows[0].keys() if rows else ["slug"])
-        w.writeheader()
-        w.writerows(rows)
-
-    wers   = [r["wer"]        for r in rows if not (isinstance(r["wer"],       float) and math.isnan(r["wer"]))]
-    ecapas = [r["ecapa_sim"]  for r in rows if not (isinstance(r["ecapa_sim"], float) and math.isnan(r["ecapa_sim"]))]
-    dnsmos = [r["dnsmos_ovr"] for r in rows if not (isinstance(r["dnsmos_ovr"],float) and math.isnan(r["dnsmos_ovr"]))]
-
-    return {
-        "WER": round(float(np.mean(wers)),   4) if wers   else float("nan"),
-        "ECAPA": round(float(np.mean(ecapas)), 4) if ecapas else float("nan"),
-        "DNSMOS_OVR": round(float(np.mean(dnsmos)), 4) if dnsmos else float("nan"),
-    }
+    posthoc_csv    = var_dir / "posthoc_scores.csv"
+    manifest_path  = _ensure_eval_clips(variant_id, ref_path, eval_clips_dir, gen_params)
+    return score_posthoc_clips(manifest_path, ECAPA_REF, posthoc_csv)
 
 
 # ---------------------------------------------------------------------------
