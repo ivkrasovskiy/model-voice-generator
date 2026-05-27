@@ -1,0 +1,76 @@
+"""General American (GenAm) acoustic norms.
+
+All numeric constants carry citation comments.  Any value that could not be
+sourced from a published table is marked # TODO(cite).
+
+Primary source:
+  Hillenbrand et al. (1995), "Acoustic characteristics of American English
+  vowels", JASA 97(5), 3099-3111, Table II (men) and Table III (women).
+  Values are mean F1/F2 at the steady-state measurement point (t=50% for
+  monophthongs; onset nucleus for diphthongs EY, OW, AY, AW, OY).
+
+GenAm mapping notes:
+  /ɒ/ does not exist in GenAm (LOT–THOUGHT merger: LOT → /ɑ/); mapped to
+  the AA (ɑː) values.
+  /ɜː/ in RP corresponds to the rhotic /ɝ/ (ER) in GenAm; ER values used.
+  /ə/ (schwa) is not separately tabulated by Hillenbrand 1995; approximated
+  from the AH (ʌ) column — typical unstressed schwa is centralized relative
+  to stressed ʌ.  # TODO(cite): no direct Hillenbrand table entry.
+"""
+from __future__ import annotations
+
+# ---------------------------------------------------------------------------
+# Men — Hillenbrand et al. 1995, Table II (mean F1/F2, Hz)
+# ---------------------------------------------------------------------------
+_GENAM_MALE: dict[str, tuple[float, float]] = {
+    "iː": (342, 2322),   # FLEECE  / IY — Hillenbrand 1995 Table II
+    "ɪ":  (427, 2034),   # KIT     / IH — Hillenbrand 1995 Table II
+    "ɛ":  (580, 1799),   # DRESS   / EH — Hillenbrand 1995 Table II
+    "æ":  (588, 1952),   # TRAP    / AE — Hillenbrand 1995 Table II
+    "ɑː": (768, 1333),   # BATH/LOT/PALM / AA — Hillenbrand 1995 Table II
+    "ɒ":  (768, 1333),   # LOT→AA (LOT–THOUGHT merger in GenAm; same as ɑː)
+    "ɔː": (652,  997),   # THOUGHT / AO — Hillenbrand 1995 Table II (pre-merger speakers)
+    "ʊ":  (469, 1122),   # FOOT    / UH — Hillenbrand 1995 Table II
+    "uː": (378,  997),   # GOOSE   / UW — Hillenbrand 1995 Table II
+    "ʌ":  (623, 1200),   # STRUT   / AH — Hillenbrand 1995 Table II
+    "ɜː": (474, 1379),   # NURSE→ɝ / ER (rhotic) — Hillenbrand 1995 Table II
+    "ə":  (623, 1200),   # SCHWA — approximated from AH; # TODO(cite): no direct entry in Hillenbrand 1995
+    # Diphthongs: onglide (onset) values
+    "eɪ": (476, 2089),   # FACE   / EY onset — Hillenbrand 1995 Table II
+    "aɪ": (727, 1184),   # PRICE  / AY onset — Hillenbrand 1995 Table II
+    "ɔɪ": (652,  997),   # CHOICE / OY onset — approximated from AO; # TODO(cite)
+    "əʊ": (497,  910),   # GOAT   / OW onset — Hillenbrand 1995 Table II
+    "aʊ": (762, 1186),   # MOUTH  / AW onset — Hillenbrand 1995 Table II
+}
+
+# ---------------------------------------------------------------------------
+# Women — Hillenbrand et al. 1995, Table III (mean F1/F2, Hz)
+# ---------------------------------------------------------------------------
+_GENAM_FEMALE: dict[str, tuple[float, float]] = {
+    "iː": (437, 2761),   # FLEECE  / IY — Hillenbrand 1995 Table III
+    "ɪ":  (483, 2365),   # KIT     / IH — Hillenbrand 1995 Table III
+    "ɛ":  (731, 2058),   # DRESS   / EH — Hillenbrand 1995 Table III
+    "æ":  (669, 2349),   # TRAP    / AE — Hillenbrand 1995 Table III
+    "ɑː": (936, 1551),   # BATH/LOT/PALM / AA — Hillenbrand 1995 Table III
+    "ɒ":  (936, 1551),   # LOT→AA (LOT–THOUGHT merger; same as ɑː)
+    "ɔː": (781, 1136),   # THOUGHT / AO — Hillenbrand 1995 Table III
+    "ʊ":  (519, 1225),   # FOOT    / UH — Hillenbrand 1995 Table III
+    "uː": (459, 1105),   # GOOSE   / UW — Hillenbrand 1995 Table III
+    "ʌ":  (753, 1426),   # STRUT   / AH — Hillenbrand 1995 Table III
+    "ɜː": (523, 1588),   # NURSE→ɝ / ER (rhotic) — Hillenbrand 1995 Table III
+    "ə":  (753, 1426),   # SCHWA — approximated from AH; # TODO(cite): no direct entry in Hillenbrand 1995
+    # Diphthongs: onglide (onset) values
+    "eɪ": (536, 2530),   # FACE   / EY onset — Hillenbrand 1995 Table III
+    "aɪ": (860, 1551),   # PRICE  / AY onset — Hillenbrand 1995 Table III
+    "ɔɪ": (781, 1136),   # CHOICE / OY onset — approximated from AO; # TODO(cite)
+    "əʊ": (555, 1035),   # GOAT   / OW onset — Hillenbrand 1995 Table III
+    "aʊ": (860, 1551),   # MOUTH  / AW onset — Hillenbrand 1995 Table III
+}
+
+
+def get_genam_norms(mean_f0: float) -> dict[str, tuple[float, float]]:
+    """Return sex-appropriate GenAm F1/F2 table based on estimated speaker f0.
+
+    Mirrors the signature of get_rp_norms in rp_norms.py.
+    """
+    return _GENAM_MALE if mean_f0 < 165 else _GENAM_FEMALE

@@ -42,6 +42,7 @@ from accent_coach.pipeline.experiment import (
 
 PHASE13_DIR  = PROJECT_ROOT / "tts_output/accent_coach/phase0_13"
 CELLS_DIR    = PHASE13_DIR / "cells"
+PHASE14_CELLS_DIR = PROJECT_ROOT / "tts_output/accent_coach/phase0_14/cells"
 CAL_CSV      = PROJECT_ROOT / "tts_output/accent_coach/cal_25.csv"
 SPK_REF      = PROJECT_ROOT / "tts_output/refs/production/ref_interview.wav"
 ECAPA_REF    = PROJECT_ROOT / "tts_output/refs/indextts_baseline/ref_narrator.wav"
@@ -191,9 +192,11 @@ def run_shift_cell(
     replicates: int,
     baseline_cents: dict,
     target_centroid: dict,
+    splice: bool = False,
 ) -> dict:
     """B4: shift target phonemes in baseline clips, re-extract, score."""
-    cell_dir = CELLS_DIR / cell_id
+    cells_dir = PHASE14_CELLS_DIR if splice else CELLS_DIR
+    cell_dir = cells_dir / cell_id
     edited_phoneme = ", ".join(sorted(target_phonemes)) if len(target_phonemes) > 1 else next(iter(target_phonemes))
 
     rep_composites: list[float] = []
@@ -242,6 +245,7 @@ def run_shift_cell(
                 segments=clip_segs,
                 target_phonemes=target_phonemes,
                 target_centroid=target_centroid,
+                splice=splice,
             )
             edits_total += r["edits_applied"]
 
@@ -326,6 +330,9 @@ def main() -> int:
                         choices=ALL_CELLS_ORDER + ["all"],
                         help="Cell to run, or 'all' for all cells in order")
     parser.add_argument("--replicates", type=int, default=3)
+    parser.add_argument("--splice", action="store_true",
+                        help="Use segment-splice WORLD path (Phase 0.14 WS-A); "
+                             "outputs go to phase0_14/cells/ (no overwrite of 0.13)")
     args = parser.parse_args()
 
     if args.replicates < 1:
@@ -355,6 +362,7 @@ def main() -> int:
                 replicates=args.replicates,
                 baseline_cents=baseline_cents,
                 target_centroid=target_centroid,
+                splice=getattr(args, "splice", False),
             )
         elif cell_id == "cell_all5":
             r = run_shift_cell(
@@ -363,6 +371,7 @@ def main() -> int:
                 replicates=args.replicates,
                 baseline_cents=baseline_cents,
                 target_centroid=target_centroid,
+                splice=getattr(args, "splice", False),
             )
         else:
             _log(f"Unknown cell: {cell_id}")

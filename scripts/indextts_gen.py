@@ -69,6 +69,10 @@ def main() -> int:
                         help="Use Qwen emotion classifier on --emo-text to derive emo vector")
     parser.add_argument("--emo-text", default=None,
                         help="Text prompt for emotion classifier (requires --use-emo-text)")
+    # LoRA adapter (WS-C)
+    parser.add_argument("--lora-adapter", default=None,
+                        help="Path to a saved PEFT LoRA adapter dir (wraps tts.gpt.gpt); "
+                             "omit for base model (byte-for-byte unchanged)")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -100,6 +104,11 @@ def main() -> int:
 
     print(f"Loading IndexTTS-2 on {args.device}...")
     tts = IndexTTS2(cfg_path=CFG_PATH, model_dir=MODEL_DIR, device=args.device)
+    if args.lora_adapter:
+        from peft import PeftModel
+        tts.gpt.gpt = PeftModel.from_pretrained(tts.gpt.gpt, args.lora_adapter)
+        tts.gpt.gpt.eval()
+        print(f"  LoRA adapter loaded: {args.lora_adapter}")
     print(f"  Model loaded. Reference: {Path(args.ref_audio).name}")
     if non_default:
         print(f"  Non-default gen params: {non_default}")

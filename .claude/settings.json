@@ -22,7 +22,28 @@
       "Bash(codegraph init *)",
       "Bash(codegraph sync *)",
       "Bash(codegraph index *)",
-      "Bash(codegraph serve *)"
+      "Bash(codegraph serve *)",
+      "Bash(mkdir -p /Users/ivkrasovskii/model-voice-generator/tts_output/refs/accent_test)",
+      "Bash(mkdir -p /Users/ivkrasovskii/model-voice-generator/tts_output/_podcast_dl/accent_probe)",
+      "Bash(yt-dlp --extract-audio --audio-format wav --audio-quality 0 -o \"tts_output/_podcast_dl/accent_probe/georgia.%\\(ext\\)s\" --force-overwrites \"https://www.youtube.com/watch?v=QICSofOItus\")",
+      "Bash(yt-dlp --extract-audio --audio-format wav --audio-quality 0 -o \"tts_output/_podcast_dl/accent_probe/scottish.%\\(ext\\)s\" --force-overwrites \"https://www.youtube.com/watch?v=mxbow_aKoAM\")",
+      "Bash(yt-dlp --extract-audio --audio-format wav --audio-quality 0 -o \"tts_output/_podcast_dl/accent_probe/irish.%\\(ext\\)s\" --force-overwrites \"https://www.youtube.com/watch?v=9xCr6IQtYqk\")",
+      "Bash(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 tts_output/_podcast_dl/accent_probe/georgia.wav)",
+      "Bash(ffmpeg -i tts_output/_podcast_dl/accent_probe/georgia.wav -af \"silencedetect=noise=-35dB:d=0.5\" -f null -)",
+      "Bash(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 tts_output/_podcast_dl/accent_probe/scottish.wav)",
+      "Bash(ffmpeg -ss 27 -t 144 -i tts_output/_podcast_dl/accent_probe/scottish.wav -af \"silencedetect=noise=-35dB:d=0.5\" -f null -)",
+      "Bash(ffmpeg -ss 27 -t 38 -i tts_output/_podcast_dl/accent_probe/irish.wav -af \"silencedetect=noise=-35dB:d=0.5\" -f null -)",
+      "Bash(ffmpeg -y -ss 9 -t 12 -i tts_output/_podcast_dl/accent_probe/georgia.wav -ac 1 -ar 22050 -c:a pcm_s16le tts_output/refs/accent_test/georgia.wav)",
+      "Bash(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 tts_output/refs/accent_test/georgia.wav)",
+      "Bash(ffmpeg -y -ss 27 -t 12 -i tts_output/_podcast_dl/accent_probe/scottish.wav -ac 1 -ar 22050 -c:a pcm_s16le tts_output/refs/accent_test/scottish.wav)",
+      "Bash(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 tts_output/refs/accent_test/scottish.wav)",
+      "Bash(ffmpeg -y -ss 27 -t 12 -i tts_output/_podcast_dl/accent_probe/irish.wav -ac 1 -ar 22050 -c:a pcm_s16le tts_output/refs/accent_test/irish.wav)",
+      "Bash(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 tts_output/refs/accent_test/irish.wav)",
+      "Bash(mkdir -p tts_output/accent_coach/phase0_14/accent_probe/georgia tts_output/accent_coach/phase0_14/accent_probe/scottish tts_output/accent_coach/phase0_14/accent_probe/irish && echo \"output dirs ready\")",
+      "Bash(echo \"georgia pid: $!\")",
+      "Bash(echo \"scottish pid: $!\")",
+      "Bash(echo \"irish pid: $!\")",
+      "Bash(kill 42703 42714 42733 45928 49580)"
     ],
     "additionalDirectories": [
       "/private/tmp",
@@ -30,7 +51,8 @@
       "/Users/ivkrasovskii/model-voice-generator/scripts",
       "/Users/ivkrasovskii/model-voice-generator/accent_coach",
       "/tmp",
-      "/Users/ivkrasovskii/model-voice-generator/docs"
+      "/Users/ivkrasovskii/model-voice-generator/docs",
+      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_14/accent_probe"
     ]
   }
 }

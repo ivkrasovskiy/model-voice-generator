@@ -17,6 +17,10 @@ from scipy.interpolate import interp1d
 # pyworld's default frame period in seconds
 _FRAME_PERIOD_MS = 5.0  # pyworld default
 _BOUNDARY_FADE_S = 0.010  # 10 ms overlap-add smoothing
+# Splice mode: run WORLD only on the segment window to avoid global round-trip
+# vocoder loss on unshifted phonemes (Phase 0.13 finding: −0.37 DNSMOS hit).
+_CONTEXT_MS = 30.0   # ms context added on each side for pitch-period coherence
+_XFADE_MS = 20.0     # ms equal-power crossfade at window boundaries
 
 
 def _time_to_frame(t_s: float, sr: int) -> int:
@@ -99,12 +103,67 @@ def _warp_sp_frame(
     return interp_sp(source_freqs).astype(np.float64)
 
 
+def _splice_one_segment(
+    audio: np.ndarray,
+    sr: int,
+    start_s: float,
+    end_s: float,
+    f1_meas: float,
+    f1_tgt: float,
+    f2_meas: float,
+    f2_tgt: float,
+) -> np.ndarray:
+    """Return audio with one segment splice-warped; all other samples original."""
+    ctx_s = _CONTEXT_MS / 1000.0
+    xfade_s = _XFADE_MS / 1000.0
+
+    win_start = max(0.0, start_s - ctx_s)
+    win_end = min(len(audio) / sr, end_s + ctx_s)
+    ws_i = int(win_start * sr)
+    we_i = int(win_end * sr)
+    window = audio[ws_i:we_i].copy()
+    win_len = we_i - ws_i
+    if win_len < 64:
+        return audio
+
+    f0_w, sp_w, ap_w = pyworld.wav2world(window, sr)
+    sp_out = sp_w.copy()
+
+    # Warp only core (non-context) frames toward target centroid
+    fr_core_start = max(0, _time_to_frame(start_s - win_start, sr))
+    fr_core_end = min(sp_w.shape[0], _time_to_frame(end_s - win_start, sr))
+    for fi in range(fr_core_start, fr_core_end):
+        sp_out[fi] = _warp_sp_frame(sp_w[fi], sr, f1_meas, f1_tgt, f2_meas, f2_tgt)
+
+    synth = pyworld.synthesize(f0_w, sp_out, ap_w, float(sr))
+
+    # RMS-match synthesized window to original to avoid level jumps
+    rms_o = np.sqrt(np.mean(window ** 2)) + 1e-8
+    rms_s = np.sqrt(np.mean(synth ** 2)) + 1e-8
+    synth = synth * (rms_o / rms_s)
+
+    # Equal-power (sqrt) crossfade at window boundaries; core replaced outright
+    xfade_n = max(1, min(int(xfade_s * sr), win_len // 4))
+    blend = np.ones(win_len)
+    ramp = np.sqrt(np.linspace(0.0, 1.0, xfade_n))
+    blend[:xfade_n] = ramp
+    blend[win_len - xfade_n:] = ramp[::-1]
+
+    slen = min(len(synth), win_len)
+    out = audio.copy()
+    out[ws_i:ws_i + slen] = (
+        blend[:slen] * synth[:slen] + (1.0 - blend[:slen]) * window[:slen]
+    )
+    return out
+
+
 def shift_vowels_to_centroid(
     wav_in: Path,
     wav_out: Path,
     segments: list[dict],
     target_phonemes: set[str],
     target_centroid: dict,
+    splice: bool = False,
 ) -> dict:
     """Shift F1/F2 of target phoneme segments toward target_centroid using WORLD.
 
@@ -116,6 +175,8 @@ def shift_vowels_to_centroid(
                phoneme, start_s, end_s, F1, F2  (F1/F2 may be "" → skipped)
     target_phonemes : set[str] — IPA phonemes to edit, e.g. {"ʌ", "ʊ"}
     target_centroid : dict — {phoneme: {"f1": float, "f2": float}}
+    splice : bool — when True, run WORLD only on each segment window (avoids
+               global round-trip vocoder loss on unshifted phonemes).
 
     Returns
     -------
@@ -130,67 +191,84 @@ def shift_vowels_to_centroid(
     audio_f32 = audio_f32.astype(np.float32)
     audio = audio_f32.astype(np.float64)
 
-    f0, sp, ap = pyworld.wav2world(audio, sr)
-    sp_out = sp.copy()
-
-    frame_period_s = _FRAME_PERIOD_MS / 1000.0
-    fade_frames = max(1, int(_BOUNDARY_FADE_S / frame_period_s))  # 2 frames at 5 ms
-    n_frames = sp.shape[0]
-
     edits_applied = 0
     segments_skipped = 0
 
-    for seg in segments:
-        phoneme = seg.get("phoneme", "")
-        if phoneme not in target_phonemes:
-            continue
-        if phoneme not in target_centroid:
-            segments_skipped += 1
-            continue
-
-        try:
-            start_s = float(seg["start_s"])
-            end_s = float(seg["end_s"])
-        except (KeyError, ValueError, TypeError):
-            segments_skipped += 1
-            continue
-
-        # Measure current F1/F2 in the segment
-        f1_meas, f2_meas = _measure_f1f2(audio_f32, sr, start_s, end_s)
-        if np.isnan(f1_meas) or np.isnan(f2_meas):
-            segments_skipped += 1
-            continue
-
-        f1_tgt = target_centroid[phoneme]["f1"]
-        f2_tgt = target_centroid[phoneme]["f2"]
-
-        # Frame range for this segment (with boundary padding)
-        fr_start = max(0, _time_to_frame(start_s, sr) - fade_frames)
-        fr_end   = min(n_frames, _time_to_frame(end_s, sr) + fade_frames)
-        seg_len  = fr_end - fr_start
-        if seg_len <= 0:
-            segments_skipped += 1
-            continue
-
-        # Cosine fade weights: 0→1 over fade_frames, 1 in core, 1→0 over fade_frames
-        weights = np.ones(seg_len)
-        ramp = (1 - np.cos(np.pi * np.arange(fade_frames) / fade_frames)) / 2.0
-        weights[:fade_frames] = ramp
-        weights[max(0, seg_len - fade_frames):] = ramp[::-1][:max(0, seg_len - fade_frames) - seg_len + fade_frames or fade_frames]
-
-        for i, fi in enumerate(range(fr_start, fr_end)):
-            w = weights[i]
-            if w <= 0:
+    if splice:
+        out_audio64 = audio.copy()
+        for seg in segments:
+            phoneme = seg.get("phoneme", "")
+            if phoneme not in target_phonemes:
                 continue
-            warped = _warp_sp_frame(sp[fi], sr, f1_meas, f1_tgt, f2_meas, f2_tgt)
-            sp_out[fi] = (1 - w) * sp[fi] + w * warped
+            if phoneme not in target_centroid:
+                segments_skipped += 1
+                continue
+            try:
+                start_s = float(seg["start_s"])
+                end_s = float(seg["end_s"])
+            except (KeyError, ValueError, TypeError):
+                segments_skipped += 1
+                continue
+            f1_meas, f2_meas = _measure_f1f2(audio_f32, sr, start_s, end_s)
+            if np.isnan(f1_meas) or np.isnan(f2_meas):
+                segments_skipped += 1
+                continue
+            f1_tgt = target_centroid[phoneme]["f1"]
+            f2_tgt = target_centroid[phoneme]["f2"]
+            out_audio64 = _splice_one_segment(
+                out_audio64, sr, start_s, end_s, f1_meas, f1_tgt, f2_meas, f2_tgt
+            )
+            edits_applied += 1
+        out_audio_f32 = np.clip(out_audio64, -1.0, 1.0).astype(np.float32)
+    else:
+        f0, sp, ap = pyworld.wav2world(audio, sr)
+        sp_out = sp.copy()
 
-        edits_applied += 1
+        frame_period_s = _FRAME_PERIOD_MS / 1000.0
+        fade_frames = max(1, int(_BOUNDARY_FADE_S / frame_period_s))  # 2 frames at 5 ms
+        n_frames = sp.shape[0]
 
-    out_audio = pyworld.synthesize(f0, sp_out, ap, float(sr))
-    out_audio_f32 = np.clip(out_audio, -1.0, 1.0).astype(np.float32)
+        for seg in segments:
+            phoneme = seg.get("phoneme", "")
+            if phoneme not in target_phonemes:
+                continue
+            if phoneme not in target_centroid:
+                segments_skipped += 1
+                continue
+            try:
+                start_s = float(seg["start_s"])
+                end_s = float(seg["end_s"])
+            except (KeyError, ValueError, TypeError):
+                segments_skipped += 1
+                continue
+            f1_meas, f2_meas = _measure_f1f2(audio_f32, sr, start_s, end_s)
+            if np.isnan(f1_meas) or np.isnan(f2_meas):
+                segments_skipped += 1
+                continue
+            f1_tgt = target_centroid[phoneme]["f1"]
+            f2_tgt = target_centroid[phoneme]["f2"]
+            fr_start = max(0, _time_to_frame(start_s, sr) - fade_frames)
+            fr_end   = min(n_frames, _time_to_frame(end_s, sr) + fade_frames)
+            seg_len  = fr_end - fr_start
+            if seg_len <= 0:
+                segments_skipped += 1
+                continue
+            weights = np.ones(seg_len)
+            ramp = (1 - np.cos(np.pi * np.arange(fade_frames) / fade_frames)) / 2.0
+            weights[:fade_frames] = ramp
+            tail = weights[max(0, seg_len - fade_frames):]
+            tail[:] = ramp[::-1][:len(tail)]
+            for i, fi in enumerate(range(fr_start, fr_end)):
+                w = weights[i]
+                if w <= 0:
+                    continue
+                warped = _warp_sp_frame(sp[fi], sr, f1_meas, f1_tgt, f2_meas, f2_tgt)
+                sp_out[fi] = (1 - w) * sp[fi] + w * warped
+            edits_applied += 1
+
+        out_audio = pyworld.synthesize(f0, sp_out, ap, float(sr))
+        out_audio_f32 = np.clip(out_audio, -1.0, 1.0).astype(np.float32)
 
     wav_out.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(wav_out), out_audio_f32, sr, subtype="FLOAT")
-
     return {"edits_applied": edits_applied, "segments_skipped": segments_skipped}
