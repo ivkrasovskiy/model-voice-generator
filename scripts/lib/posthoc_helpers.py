@@ -88,6 +88,7 @@ def gen_with_retry(tts, text: str, settings: GenSettings, max_retries: int = 5):
 def compute_ref_centroid(centroid_dir: Path, n_samples: int, ecapa, seed: int) -> np.ndarray:
     """Embed N random WAVs from centroid_dir and average → speaker identity centroid."""
     import random
+
     from lib.audio_io import read_wav_mono
     from lib.identity import embed_wav
 

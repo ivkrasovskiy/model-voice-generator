@@ -14,7 +14,6 @@ import pyworld
 import soundfile as sf
 from scipy.interpolate import interp1d
 
-
 # pyworld's default frame period in seconds
 _FRAME_PERIOD_MS = 5.0  # pyworld default
 _BOUNDARY_FADE_S = 0.010  # 10 ms overlap-add smoothing

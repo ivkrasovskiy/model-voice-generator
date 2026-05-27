@@ -116,7 +116,6 @@ def _write_shifted_manifest(
     """Write a new manifest.json pointing to shifted WAVs."""
     new_entries = []
     for entry in baseline_manifest:
-        slug = entry.get("slug", entry.get("clip_id", "?"))
         orig_wav = Path(entry.get("wav_path", entry.get("path", "")))
         shifted_wav = shifted_dir / orig_wav.name
         new_entry = dict(entry)

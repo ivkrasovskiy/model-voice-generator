@@ -204,8 +204,8 @@ def main() -> int:
     if args.dry_run:
         index_path = EMO_DENSE_DIR / "index.json"
         if not index_path.exists():
-            print(f"Lever A dry-run: emo_dense/index.json not yet generated.")
-            print(f"  Run accent_coach_phase0_13_mine_emo.py first to mine candidates.")
+            print("Lever A dry-run: emo_dense/index.json not yet generated.")
+            print("  Run accent_coach_phase0_13_mine_emo.py first to mine candidates.")
             print(f"  Will generate: {len([None for _ in range(3) for _ in EMO_ALPHAS])} cells × {args.replicates} reps")
             return 0
         candidates = _load_candidates()

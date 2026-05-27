@@ -31,14 +31,13 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np
 
+# bark_control ONLY — imported in this script, never in f3_normalization.py
+from accent_coach.diagnostics.bark_distance import bark_transform
 from accent_coach.diagnostics.f3_normalization import (
     f_ratios,
     nearey_intrinsic,
     syrdal_gopal,
 )
-
-# bark_control ONLY — imported in this script, never in f3_normalization.py
-from accent_coach.diagnostics.bark_distance import bark_transform
 
 PHASE13C_DIR     = PROJECT_ROOT / "tts_output/accent_coach/phase0_13c"
 F3_CSV_DIR       = PHASE13C_DIR / "formants_with_f3"

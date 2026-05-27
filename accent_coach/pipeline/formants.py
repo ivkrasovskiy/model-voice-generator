@@ -7,6 +7,9 @@ from pathlib import Path
 import numpy as np
 import parselmouth
 
+from accent_coach.models import PhonemeInstance, VowelFeatures
+from accent_coach.pipeline.alignment import IPA_VOWELS
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 PROJECT_PYTHON = PROJECT_ROOT / ".venv/bin/python"
 
@@ -47,9 +50,6 @@ def extract_formants(
         raise RuntimeError(f"accent_coach_extract_formants.py failed (exit {r.returncode})")
     _log(f"extract_formants: done in {elapsed:.0f}s → {out_csv.name}")
     return out_csv
-
-from accent_coach.models import PhonemeInstance, VowelFeatures
-from accent_coach.pipeline.alignment import IPA_VOWELS
 
 _MIN_VOWEL_MS      = 40.0  # raised: very short windows land on transitions, not nuclei
 _MIN_VOICED_FRAC   = 0.35  # Why: require 35% of frames voiced; pure consonant/silence frames

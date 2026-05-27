@@ -25,7 +25,6 @@ INDEXTTS_ROOT = PROJECT_ROOT / "vendor" / "index-tts"
 
 sys.path.insert(0, str(INDEXTTS_ROOT))
 
-import torch
 import soundfile as sf
 from indextts.infer_v2 import IndexTTS2
 

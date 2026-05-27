@@ -50,7 +50,7 @@ def load_scoring_models(device: str = "cpu") -> tuple:
 def _get_ref_emb(ecapa_ref: Path, ecapa) -> np.ndarray:
     global _ECAPA_REF_EMB, _ECAPA_REF_PATH
     ref_key = str(ecapa_ref)
-    if _ECAPA_REF_EMB is not None and _ECAPA_REF_PATH == ref_key:
+    if _ECAPA_REF_EMB is not None and ref_key == _ECAPA_REF_PATH:
         return _ECAPA_REF_EMB
     from lib.identity import embed_file
     emb = embed_file(str(ecapa_ref), ecapa)

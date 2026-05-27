@@ -82,7 +82,7 @@ def _self_test() -> None:
     ref_sg = (z3 - z1, z3 - z2)
 
     got_sg = syrdal_gopal(F1, F2, F3)
-    for got, ref, name in zip(got_sg, ref_sg, ("Z3-Z1", "Z3-Z2")):
+    for got, ref, name in zip(got_sg, ref_sg, ("Z3-Z1", "Z3-Z2"), strict=False):
         err = abs(got - ref) / (abs(ref) + 1e-12)
         assert err < 0.01, f"syrdal_gopal {name}: got {got:.4f}, ref {ref:.4f}, err {err:.4%}"
 
@@ -91,14 +91,14 @@ def _self_test() -> None:
     ref_ni = (math.log(F1) - log_gm_ref, math.log(F2) - log_gm_ref)
 
     got_ni = nearey_intrinsic(F1, F2, F3)
-    for got, ref, name in zip(got_ni, ref_ni, ("logF1-lgm", "logF2-lgm")):
+    for got, ref, name in zip(got_ni, ref_ni, ("logF1-lgm", "logF2-lgm"), strict=False):
         err = abs(got - ref) / (abs(ref) + 1e-12)
         assert err < 0.01, f"nearey_intrinsic {name}: got {got:.4f}, ref {ref:.4f}, err {err:.4%}"
 
     # --- F-ratios ---
     ref_fr = (F1 / F3, F2 / F3)
     got_fr = f_ratios(F1, F2, F3)
-    for got, ref, name in zip(got_fr, ref_fr, ("F1/F3", "F2/F3")):
+    for got, ref, name in zip(got_fr, ref_fr, ("F1/F3", "F2/F3"), strict=False):
         err = abs(got - ref) / (abs(ref) + 1e-12)
         assert err < 0.01, f"f_ratios {name}: got {got:.4f}, ref {ref:.4f}, err {err:.4%}"
 
