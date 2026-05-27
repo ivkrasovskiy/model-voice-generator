@@ -342,17 +342,240 @@ the 5 targets).
 
 ---
 
-## 5. File outputs (final state)
+## 5. Phase 0.13c — F3-based normalization bench (INDEPENDENT of A and B)
+
+### 5.1. Goal
+
+Test whether F3-based, **speaker-intrinsic, per-token** normalization tightens
+the native RP cluster `{fry, lindsey, bbc_male}` more than the current Bark
+transform — **without** erasing the L2 vowel-space compression signal that
+Lobanov destroyed (see [feedback memory](../.claude/projects/-Users-ivkrasovskii-model-voice-generator/memory/project_phase0_6_lobanov_limit.md)).
+
+**This phase is a measurement experiment only.** It does not change the
+production scoring path. Output is a number per method; no Phase 0.13a/b
+artifacts are touched and no Phase 0.10/0.11/0.12 scores are recomputed under
+the new metric in this phase.
+
+### 5.2. Independence
+
+- Inputs from A/B: **none**.
+- Outputs consumed by A/B: **none**.
+- Can be executed in parallel with A and B, in any order, by any worker.
+
+### 5.3. Hypothesis
+
+H5: A speaker-intrinsic F3 method (Syrdal-Gopal, Nearey intrinsic, or F-ratios)
+reduces native intra-cluster variance ≥ 20 % relative to Bark while preserving
+owner-vs-RP discrimination within 15 % of Bark.
+
+H6 (negative): All F3 methods either fail to tighten the cluster meaningfully
+or erase L2 discrimination the way Lobanov did.
+
+### 5.4. Hard constraints — special to Phase 0.13c
+
+| Constraint | Rule |
+|---|---|
+| Production scoring path | **Untouched.** `accent_coach.diagnostics.bark_distance`, `accent_coach.diagnostics.cluster_eval`, `accent_coach.comparison.vowels`, `accent_coach.pipeline.experiment` MUST NOT be edited. |
+| New normalization module | **Starts from raw F1/F2/F3 in Hz.** Implements each method from first principles. **MUST NOT import** `bark_transform`, `per_phoneme_sigma_rp`, `score_vowels_piecewise`, or any other existing-pipeline normalization symbol. No copy-paste of the existing Bark code into the new module. |
+| Existing CSVs / centroids | `tts_output/accent_coach/cleaned_corpus/` and `tts_output/accent_coach/bench/phase0_7/` are **read-only**. Re-extraction goes to a new directory. |
+| Opt-in | New normalization is exposed ONLY through the bench script. `load_baseline_centroids()`, `score_against()`, `generate_clips()`, and every other production function continues to use Bark unchanged. |
+| Default behaviour | Unchanged everywhere. No CLI flag added to production scripts in Phase 0.13c. |
+
+### 5.5. Tasks
+
+#### C1. Add F3 column to formant CSV writer
+
+**What**: One small backwards-compatible edit to
+[scripts/accent_coach_extract_formants.py](../scripts/accent_coach_extract_formants.py).
+F3 is already computed by [accent_coach/pipeline/formants.py:62](../accent_coach/pipeline/formants.py#L62)
+and stored on `VowelFeatures.f3` ([accent_coach/models.py:22](../accent_coach/models.py#L22))
+— it is only dropped at the CSV writer.
+
+Changes:
+- In the row dict (around line 95-103): add `"F3": (round(vf.f3, 1) if vf.f3 is not None else "")`.
+- In `fieldnames` (around line 111): insert `"F3"` between `"F2"` and `"voiced_fraction"`.
+
+**Backwards compatibility check** before editing:
+```bash
+rtk grep -rn "fieldnames.*F2\|F1.*F2.*voiced_fraction\|reader\.fieldnames" scripts/ accent_coach/ tests/
+```
+If any reader relies on positional column order (not name-based), STOP and
+report. `csv.DictReader` access by column name is safe.
+
+**Verify** (after editing): re-extract one small manifest and confirm the
+CSV has 8 columns including `F3`, and `csv.DictReader` reads non-empty
+F3 for ≥ 80 % of rows.
+
+---
+
+#### C2. Re-extract formants with F3 to a new directory
+
+**What**: Run the (now F3-aware) extractor on the existing manifests for the
+six speakers needed by the bench. Output goes to a NEW directory; existing
+CSVs are not touched.
+
+**Files / dirs**:
+- `tts_output/accent_coach/phase0_13c/formants_with_f3/{fry,lindsey,bbc_male,real_BC,owner,synth_BC}.csv` [new]
+
+**Source manifests** (Sonnet to resolve exact paths from the existing layout —
+they are the same manifests used by Phase 0.12 corpus rebuild and Phase 0.7
+bench). Hints:
+- fry, lindsey → `tts_output/accent_coach/cleaned_corpus/{spk}/manifest.json` (already produced by Phase 0.12)
+- bbc_male, real_BC, owner → look under `tts_output/accent_coach/bench/phase0_7/` for the corresponding manifests
+- synth_BC → re-use the frozen Phase 0.7 synth_BC manifest OR generate fresh on cal_25 if not available
+
+**Critical**: do NOT overwrite or move the source manifests. New CSV outputs only.
+
+**Verify**:
+```bash
+.venv/bin/python -c "
+import csv
+from pathlib import Path
+for f in Path('tts_output/accent_coach/phase0_13c/formants_with_f3').glob('*.csv'):
+    rows = list(csv.DictReader(f.open()))
+    n_f3 = sum(1 for r in rows if r.get('F3', '').strip() not in ('', 'nan'))
+    print(f'{f.name}: {len(rows)} rows, F3 present in {n_f3} ({100*n_f3/max(len(rows),1):.0f}%)')
+"
+```
+Expected: F3 present in ≥ 80 % of rows per speaker.
+
+---
+
+#### C3. Implement F3 normalization methods (fresh module, NO Bark imports)
+
+**Files to create**:
+- `accent_coach/diagnostics/f3_normalization.py`
+
+**Critical**:
+- This module MUST NOT contain `from accent_coach.diagnostics.bark_distance import ...`, MUST NOT contain `from accent_coach.diagnostics.cluster_eval import ...`, MUST NOT contain `from accent_coach.comparison.vowels import ...`.
+- Inputs: raw F1, F2, F3 in Hz (numpy arrays or scalars).
+- Outputs: 2-tuples `(dim1, dim2)` in the new coordinate space.
+- No centroid math, no per-speaker statistics, no aggregation — pure point functions.
+
+**Methods to implement**:
+
+```python
+def syrdal_gopal(f1_hz, f2_hz, f3_hz):
+    """Syrdal & Gopal 1986 Bark-difference metric.
+    Implements bark from Hz locally (Traunmüller 1990):
+      Z = (26.81 * f_hz) / (1960 + f_hz) - 0.53
+    Returns (Z3 - Z1, Z3 - Z2)."""
+
+def nearey_intrinsic(f1_hz, f2_hz, f3_hz):
+    """Nearey 1978 CLIH intrinsic.
+    Per token: log_gm = mean(log(F1), log(F2), log(F3))
+    Returns (log(F1) - log_gm, log(F2) - log_gm)."""
+
+def f_ratios(f1_hz, f2_hz, f3_hz):
+    """Simple speaker-size-invariant ratios.
+    Returns (F1 / F3, F2 / F3)."""
+```
+
+**Verify** with hand-computed reference values. For an adult male /ɑ/ at
+F1=730, F2=1090, F3=2440 Hz:
+
+- Syrdal-Gopal: Z1 ≈ 6.78, Z2 ≈ 8.97, Z3 ≈ 14.74; (Z3-Z1, Z3-Z2) ≈ (7.96, 5.77)
+- Nearey intrinsic: log_gm ≈ 7.241; (log F1 − log_gm, log F2 − log_gm) ≈ (-0.648, -0.241)
+- F-ratios: (730/2440, 1090/2440) ≈ (0.299, 0.447)
+
+If any output is off by more than 1 % from the reference, STOP and re-check the formula. (Sonnet: recompute the references yourself; do not trust the comment above blindly — comment is a sanity guide, not a test fixture.)
+
+---
+
+#### C4. Bench script
+
+**Files to create**:
+- `scripts/accent_coach_phase0_13c_f3_bench.py`
+
+**Algorithm**:
+1. Load the six F3-bearing CSVs from C2. Drop rows where F3 is missing,
+   F1 > 900 Hz (already filtered upstream), or duration_s < 0.05.
+2. For each method `M ∈ {bark_control, syrdal_gopal, nearey_intrinsic, f_ratios}`:
+   a. Apply M per token → `(dim1, dim2)` columns added to a working dataframe.
+   b. Build per-(phoneme, speaker) centroids: mean over tokens.
+   c. **Native tightness**: for each of the 17 target phonemes, compute the
+      stddev of `(dim1, dim2)` across the three native centroids
+      `{fry, lindsey, bbc_male}`. Aggregate via mean across phonemes.
+   d. **L2 discrimination**: per phoneme, Euclidean distance
+      `|owner_centroid − modern_rp_centroid|` where `modern_rp` here is the
+      mean of native 3 in this method's space. Aggregate via mean across phonemes.
+   e. **BC gap**: same but `|real_BC − modern_rp|`.
+3. The `bark_control` row is the ONLY caller of the existing
+   `accent_coach.diagnostics.bark_distance.bark_transform`. Import it in the
+   bench script ONLY (never in `f3_normalization.py`). Use it read-only — do
+   not write any Bark-derived output back to the production paths.
+4. Output to `docs/accent_coach_phase0_13c_norm_bench.csv` with columns:
+   `method, native_tightness, l2_discrimination, bc_gap, native_tightness_rel_bark, l2_discrimination_rel_bark, bc_gap_rel_bark`.
+
+**Verify**:
+```bash
+.venv/bin/python scripts/accent_coach_phase0_13c_f3_bench.py
+```
+Expected: 4 rows in the output CSV (one per method); `bark_control` row has
+`*_rel_bark == 1.000` for all three; other rows have ratios reported to 3 dp.
+
+---
+
+#### C5. Findings doc
+
+**Files to create**:
+- `docs/accent_coach_phase0_13c_norm_findings.md`
+
+**Required sections**:
+1. **Verdict** — apply §5.6 stop criteria to the bench table.
+2. **Bench table** — render `accent_coach_phase0_13c_norm_bench.csv` as a
+   markdown table.
+3. **Per-phoneme breakdown** — for the winning method (if any), show per-phoneme
+   native stddev, L2 distance, BC gap. Highlight phonemes where the winning
+   method does notably better or worse than Bark.
+4. **Vowel space plot** — one plot per method showing the 4 speakers
+   `{owner, real_BC, synth_BC, modern_rp}` in that method's coordinate space.
+   Output: `docs/img/phase0_13c_norm_{method}.png`. Adapt
+   [scripts/accent_coach_phase0_10_plot.py](../scripts/accent_coach_phase0_10_plot.py)
+   for the new coordinate axes — do NOT modify the original plot script.
+5. **Recommendation** — explicit GREEN/YELLOW/RED decision per §5.6 and the
+   suggested follow-up (e.g. "switch in Phase 0.14" or "stay on Bark").
+
+### 5.6. Stop criteria for Phase 0.13c
+
+Let `T(M), D(M), G(M)` be native tightness, L2 discrimination, BC gap of method
+`M`, and let `T_b, D_b, G_b` be the same for `bark_control`. Smaller `T` is
+better; larger `D` and `G` are better.
+
+| Outcome | Trigger | Action |
+|---|---|---|
+| **GREEN** | ∃ method M with `T(M) ≤ 0.80 · T_b` AND `D(M) ≥ 0.85 · D_b` AND `G(M) ≥ 0.75 · G_b` | Document the winner. **Propose** switching the production normalization in a follow-up Phase 0.14. **Do NOT switch in 0.13.** |
+| **YELLOW** | ∃ method M with `T(M) ≤ 0.90 · T_b` AND `D(M) ≥ 0.70 · D_b` but not GREEN | Worth exploring a mixed scoring (e.g. Bark for coaching, F3 for cluster tolerance). Document the trade-off table; no production change. |
+| **RED** | No method satisfies even YELLOW (every method either tightens < 10 % or loses > 30 % discrimination) | Bark remains the production normalization. Lobanov-style failure mode confirmed across F3 methods too. Findings doc still gets written — the negative result is valuable. |
+
+### 5.7. Special anti-patterns for Phase 0.13c
+
+1. **DO NOT** import `bark_transform`, `per_phoneme_sigma_rp`, or `score_vowels_piecewise` from anywhere into `accent_coach/diagnostics/f3_normalization.py`. The new module is independent and starts from raw Hz.
+2. **DO NOT** modify `accent_coach/diagnostics/bark_distance.py` or `accent_coach/comparison/vowels.py` or `accent_coach/pipeline/experiment.py`.
+3. **DO NOT** add the new normalization as an option in production scripts (`indextts_gen.py`, `accent_coach_phase0_13_lever_b.py`, `accent_coach_phase0_13_lever_a.py`, etc.) in this phase. New methods exist only inside the bench.
+4. **DO NOT** overwrite anything under `tts_output/accent_coach/cleaned_corpus/` or `tts_output/accent_coach/bench/phase0_7/`. Re-extraction outputs go to `tts_output/accent_coach/phase0_13c/`.
+5. **DO NOT** recompute Phase 0.10/0.11/0.12 historical scores under the new metric. That recomputation, if needed, belongs in a follow-up phase.
+6. **DO NOT** rewrite the CSV writer to drop existing columns; F3 is ADDED, F1/F2/voiced_fraction/etc. stay where they are.
+7. **DO NOT** assume F3 is always present — handle `None`/NaN gracefully; the bench filters such rows out, it does not crash.
+
+---
+
+## 6. File outputs (final state)
 
 ```
 scripts/
   accent_coach_phase0_13_lever_b.py           [new — Lever B driver]
   accent_coach_phase0_13_lever_a.py           [new — Lever A driver]
   accent_coach_phase0_13_mine_emo.py          [new — phoneme-dense emo clip selection]
+  accent_coach_phase0_13c_f3_bench.py         [new — F3 normalization bench (independent)]
+  accent_coach_extract_formants.py            [modified — adds F3 column to CSV (~3 lines)]
 
 accent_coach/dsp/
   __init__.py                                 [new if missing]
   formant_shift.py                            [new — pyworld + parselmouth warp]
+
+accent_coach/diagnostics/
+  f3_normalization.py                         [new — fresh module, NO imports from existing pipeline]
 
 tts_output/accent_coach/phase0_13/
   cells/cell_baseline_b/rep_{0,1,2}/clips/    [new — N=3 baselines]
@@ -367,13 +590,19 @@ tts_output/accent_coach/phase0_13/
   lever_a_grid.csv                            [new — only if Lever A runs]
   lever_b_grid.csv                            [new]
 
+tts_output/accent_coach/phase0_13c/
+  formants_with_f3/{fry,lindsey,bbc_male,real_BC,owner,synth_BC}.csv  [new — F3-bearing extracts]
+
 docs/
   accent_coach_phase0_13_plan.md              [this file]
   accent_coach_phase0_13_lever_b_findings.md  [new]
   accent_coach_phase0_13_lever_a_findings.md  [new — only if Lever A runs]
   accent_coach_phase0_13_findings.md          [new — combined summary, GREEN/YELLOW/RED]
+  accent_coach_phase0_13c_norm_bench.csv      [new — F3 bench output table]
+  accent_coach_phase0_13c_norm_findings.md    [new — F3 bench findings]
   img/phase0_13_4speaker_lever_b.png          [new]
   img/phase0_13_4speaker_lever_a.png          [new — only if Lever A runs]
+  img/phase0_13c_norm_{bark_control,syrdal_gopal,nearey_intrinsic,f_ratios}.png  [new — F3 bench plots]
 ```
 
 ---
@@ -401,6 +630,14 @@ docs/
    and stop; recommend fine-tuning.
 10. **Do not poll background jobs.** When `run_in_background=true`, you get a
     notification when done. Use the wait.
+11. **Do not let the F3 bench (Phase 0.13c) leak into production code.** The
+    new normalization methods live ONLY in `accent_coach/diagnostics/f3_normalization.py`
+    and are exercised ONLY by `scripts/accent_coach_phase0_13c_f3_bench.py`.
+    `pipeline/experiment.py`, `score_against`, `bark_distance`, and every
+    Lever-A/B script continue to use Bark unchanged. See §5.4 / §5.7.
+12. **Do not reimplement the existing Bark transform inside `f3_normalization.py`.**
+    The new module is for new methods; for the `bark_control` comparison row,
+    the bench script imports the existing `bark_transform` ONCE (read-only).
 
 ---
 
@@ -426,6 +663,18 @@ docs/
 .venv/bin/python scripts/accent_coach_phase0_13_mine_emo.py
 .venv/bin/python scripts/accent_coach_phase0_13_lever_a.py --replicates 3
 # Evaluate §4.4 stop criteria.
+
+# Phase 0.13c — F3 normalization bench (INDEPENDENT — can run anytime)
+# C1: backwards-compat check before editing the CSV writer
+rtk grep -rn "fieldnames.*F2\|F1.*F2.*voiced_fraction\|reader\.fieldnames" scripts/ accent_coach/ tests/
+
+# C2: re-extract corpus with F3 column (after C1 edit)
+mkdir -p tts_output/accent_coach/phase0_13c/formants_with_f3
+# (per-speaker extract commands — see §5.5 C2)
+
+# C4: bench (after C3 module is in place)
+.venv/bin/python scripts/accent_coach_phase0_13c_f3_bench.py
+# Evaluate §5.6 stop criteria.
 ```
 
 ---
@@ -441,3 +690,16 @@ docs/
 - **RED both**: gap is fundamentally in the model. Path forward is one of:
   (a) LoRA fine-tune on a BC-leaning RP corpus; (b) switch base model; (c)
   accept the 13.5-pt gap and ship as-is. Out of scope for this plan.
+
+### Phase 0.13c outcomes
+
+- **GREEN**: a winning F3 method is documented. **Open Phase 0.14** to switch
+  the production normalization, recompute Phase 0.10–0.12 historical scores
+  under the new metric, and re-evaluate Lever A/B stop criteria under the new
+  baseline. Do NOT flip the switch inside 0.13.
+- **YELLOW**: trade-off is real but not clean. Consider a hybrid scheme (Bark
+  for coaching, F3 for cluster tolerance) in a follow-up. Production stays
+  on Bark.
+- **RED**: Bark is confirmed as the best speaker-blind normalization available
+  to us with current per-token F3 estimates. The negative result is itself
+  useful — close the door and move on.

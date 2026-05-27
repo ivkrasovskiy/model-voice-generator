@@ -1,0 +1,5 @@
+method,native_tightness,l2_discrimination,bc_gap,native_tightness_rel_bark,l2_discrimination_rel_bark,bc_gap_rel_bark
+bark_control,0.5399,0.8976,0.4904,1.0,1.0,1.0
+syrdal_gopal,0.5635,1.0445,0.4606,1.044,1.164,0.939
+nearey_intrinsic,0.0808,0.1521,0.0517,0.15,0.169,0.105
+f_ratios,0.0324,0.0697,0.0296,0.06,0.078,0.06

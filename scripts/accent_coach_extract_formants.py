@@ -96,8 +96,11 @@ def extract_formants(
                     "clip_id": clip_id,
                     "source_label": row_label,
                     "phoneme": vf.phoneme.phoneme,
+                    "start_s": round(vf.phoneme.start_time, 4),
+                    "end_s": round(vf.phoneme.end_time, 4),
                     "F1": round(vf.f1, 1),
                     "F2": round(vf.f2, 1),
+                    "F3": round(vf.f3, 1) if vf.f3 is not None else "",
                     "voiced_fraction": float("nan"),  # not exposed by pipeline; all survivors pass ≥35%
                     "duration_s": round(vf.duration_ms / 1000.0, 4),
                     "transcript": transcript,
@@ -108,8 +111,8 @@ def extract_formants(
 
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", newline="") as f:
-        fieldnames = ["clip_id", "source_label", "phoneme", "F1", "F2",
-                      "voiced_fraction", "duration_s", "transcript"]
+        fieldnames = ["clip_id", "source_label", "phoneme", "start_s", "end_s",
+                      "F1", "F2", "F3", "voiced_fraction", "duration_s", "transcript"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)

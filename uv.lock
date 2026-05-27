@@ -2135,6 +2135,7 @@ dependencies = [
     { name = "praat-parselmouth" },
     { name = "pydub" },
     { name = "python-dotenv" },
+    { name = "pyworld" },
     { name = "resemblyzer" },
     { name = "safetensors" },
     { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -2182,6 +2183,7 @@ requires-dist = [
     { name = "praat-parselmouth", specifier = ">=0.4.7" },
     { name = "pydub" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyworld", specifier = ">=0.3.5" },
     { name = "resemblyzer" },
     { name = "safetensors" },
     { name = "scikit-learn" },
@@ -3644,6 +3646,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ff/46/dd499ec9038423421951e4fad73051febaa13d2df82b4064f87af8b8c0c3/pytz-2026.2.tar.gz", hash = "sha256:0e60b47b29f21574376f218fe21abc009894a2321ea16c6754f3cad6eb7cdd6a", size = 320861, upload-time = "2026-05-04T01:35:29.667Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/dd/96da98f892250475bdf2328112d7468abdd4acc7b902b6af23f4ed958ea0/pytz-2026.2-py2.py3-none-any.whl", hash = "sha256:04156e608bee23d3792fd45c94ae47fae1036688e75032eea2e3bf0323d1f126", size = 510141, upload-time = "2026-05-04T01:35:27.408Z" },
+]
+
+[[package]]
+name = "pyworld"
+version = "0.3.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a5/0f/c78d631ffbb4c1aaebf80ff2bf9e791213b381dbe404f9ce1a3eb3672931/pyworld-0.3.5.tar.gz", hash = "sha256:1b93e53cddb67a0e4faa34d6cf919ac6c662feb1c8c0ed901d71b595ab396aa3", size = 261021, upload-time = "2025-01-20T16:07:51.261Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7f/fe/761706a26807c703e6c4e4f47b2d36e644214f6392e8bc20e79845a55808/pyworld-0.3.5-cp310-cp310-win_amd64.whl", hash = "sha256:829876828de51c7f5fdd06efa0283d69f9897b592e034db9ded857e378bf625c", size = 224164, upload-time = "2025-01-21T15:53:30.684Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/fd/de13003de61ae39ce0952158aab502443e822d149d4d35be93e3b466fa12/pyworld-0.3.5-cp311-cp311-win_amd64.whl", hash = "sha256:538a359862f4bcfa7a58c019644f78941c94dc66a654be8567054ee9c1fc8f1b", size = 225230, upload-time = "2025-01-21T15:53:35.005Z" },
 ]
 
 [[package]]

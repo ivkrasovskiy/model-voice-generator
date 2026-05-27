@@ -16,12 +16,18 @@
       "Write",
       "Read",
       "Bash(python3 -m json.tool)",
-      "Bash(tee -a tts_output/accent_coach/cleaned_corpus/phase0_12_run.log)"
+      "Bash(tee -a tts_output/accent_coach/cleaned_corpus/phase0_12_run.log)",
+      "Bash(mkdir -p accent_coach/dsp)",
+      "Bash(pkill -f \"accent_coach_phase0_13_lever_a\")",
+      "Bash(nohup .venv/bin/python scripts/accent_coach_phase0_13_lever_a.py --replicates 3 > /tmp/lever_a.log 2>&1 & *)",
+      "Bash(git check-ignore *)"
     ],
     "additionalDirectories": [
       "/private/tmp",
       "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach",
-      "/Users/ivkrasovskii/model-voice-generator/scripts"
+      "/Users/ivkrasovskii/model-voice-generator/scripts",
+      "/Users/ivkrasovskii/model-voice-generator/accent_coach",
+      "/tmp"
     ]
   }
 }
