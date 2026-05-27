@@ -43,7 +43,7 @@ from lib.scoring import load_scoring_models, score_single_wav
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
-REF_AUDIO = PROJECT_ROOT / "tts_output/ref_narrator.wav"
+REF_AUDIO = PROJECT_ROOT / "tts_output/refs/indextts_baseline/ref_narrator.wav"
 REF_TEXT = "this an ideal opportunity for obtaining from her everything I wished."
 
 # Inference knobs — overridden from CLI in main(); module-level so the gen helpers

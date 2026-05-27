@@ -43,8 +43,8 @@ from accent_coach.pipeline.experiment import (
 PHASE13_DIR  = PROJECT_ROOT / "tts_output/accent_coach/phase0_13"
 CELLS_DIR    = PHASE13_DIR / "cells"
 CAL_CSV      = PROJECT_ROOT / "tts_output/accent_coach/cal_25.csv"
-SPK_REF      = PROJECT_ROOT / "tts_output/ref_interview.wav"
-ECAPA_REF    = PROJECT_ROOT / "tts_output/ref_narrator.wav"
+SPK_REF      = PROJECT_ROOT / "tts_output/refs/production/ref_interview.wav"
+ECAPA_REF    = PROJECT_ROOT / "tts_output/refs/indextts_baseline/ref_narrator.wav"
 
 BASE_PARAMS = {
     "num_beams":       5,

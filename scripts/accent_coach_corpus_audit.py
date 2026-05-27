@@ -35,11 +35,11 @@ CORPUS   = PROJECT_ROOT / "tts_output/modern_rp_corpus"
 # Use the same 14s emo refs we extracted — verified clean monologue.
 SPEAKERS = {
     "lindsey": {
-        "ref":   PROJECT_ROOT / "tts_output/ref_lindsey_emo.wav",
+        "ref":   PROJECT_ROOT / "tts_output/refs/rp_ceiling/ref_lindsey_emo.wav",
         "clips": CORPUS / "lindsey/clips",
     },
     "fry": {
-        "ref":   PROJECT_ROOT / "tts_output/ref_fry_emo.wav",
+        "ref":   PROJECT_ROOT / "tts_output/refs/rp_ceiling/ref_fry_emo.wav",
         "clips": CORPUS / "fry/clips",
     },
 }

@@ -31,7 +31,7 @@ from indextts.infer_v2 import IndexTTS2
 
 _DEFAULT_DEVICE = "cpu"  # MPS unsupported: bigvgan alias_free conv_transpose1d fails >65536 channels
 
-DEFAULT_REF = str(PROJECT_ROOT / "tts_output/ref_interview.wav")
+DEFAULT_REF = str(PROJECT_ROOT / "tts_output/refs/production/ref_interview.wav")
 DEFAULT_PHRASES = str(PROJECT_ROOT / "tts_output/cross_eval_50/eval_short.csv")
 DEFAULT_OUT = str(PROJECT_ROOT / "tts_output/eval_indextts_v2")
 

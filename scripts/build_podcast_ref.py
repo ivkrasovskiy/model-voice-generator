@@ -1,7 +1,7 @@
 """
 Download + trim a YouTube interview clip to use as an IndexTTS-2 reference.
 
-The current baseline `tts_output/ref_narrator.wav` is audiobook material and
+The current baseline `tts_output/refs/indextts_baseline/ref_narrator.wav` is audiobook material and
 carries BC's narrator-creak. This script grabs a clip from an interview/podcast
 (no creak, normal conversational voice) and produces a drop-in replacement.
 
@@ -25,7 +25,7 @@ from pathlib import Path
 DEFAULT_URL = "https://youtu.be/cHmkAStZBkc"
 DEFAULT_START = "00:04:31"
 DEFAULT_DURATION = "34"
-DEFAULT_OUT = "tts_output/ref_interview.wav"
+DEFAULT_OUT = "tts_output/refs/production/ref_interview.wav"
 
 
 def main() -> int:

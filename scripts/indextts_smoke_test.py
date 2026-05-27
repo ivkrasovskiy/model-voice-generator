@@ -49,7 +49,7 @@ THRESHOLDS = {
 # Pick 2 phrases from eval_short.csv that should hit thresholds easily on baseline
 SMOKE_SLUGS = list(THRESHOLDS.keys())
 
-REF_AUDIO = str(PROJECT_ROOT / "tts_output/ref_narrator.wav")
+REF_AUDIO = str(PROJECT_ROOT / "tts_output/refs/indextts_baseline/ref_narrator.wav")
 PHRASES_CSV = PROJECT_ROOT / "tts_output/cross_eval_50/eval_short.csv"
 CFG_PATH = str(INDEXTTS_ROOT / "checkpoints/config.yaml")
 MODEL_DIR = str(INDEXTTS_ROOT / "checkpoints")

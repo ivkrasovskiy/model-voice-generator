@@ -7,7 +7,7 @@ Usage:
     .venv/bin/python scripts/accent_coach_build_real_bc.py
     .venv/bin/python scripts/accent_coach_build_real_bc.py \\
         --primary-url https://youtu.be/cHmkAStZBkc \\
-        --ref-wav tts_output/ref_interview.wav \\
+        --ref-wav tts_output/refs/production/ref_interview.wav \\
         --out-dir tts_output/real_bc_corpus
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ import soundfile as sf
 
 DEFAULT_PRIMARY = "https://youtu.be/cHmkAStZBkc"
 DEFAULT_SECONDARY = "https://www.youtube.com/watch?v=UKfBtgDSCzw"
-DEFAULT_REF = "tts_output/ref_interview.wav"
+DEFAULT_REF = "tts_output/refs/production/ref_interview.wav"
 DEFAULT_OUT = "tts_output/real_bc_corpus"
 DEFAULT_MIN_NET = 300  # 5 minutes
 
