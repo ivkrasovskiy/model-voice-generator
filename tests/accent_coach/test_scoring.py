@@ -216,19 +216,13 @@ def test_score_against_distance_monotonicity():
 def test_regression_aggregate_modern_rp_with_none_phoneme():
     """Phase 0.12 bug: aggregate_modern_rp crashed on phonemes where one source
     speaker had None. Verify the fix handles None gracefully."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "rebuild",
-        Path(__file__).parent.parent.parent / "scripts/accent_coach_phase0_12_rebuild.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    from accent_coach.pipeline.centroids import aggregate_modern_rp
 
     lindsey = {"iː": {"f1": 280, "f2": 2200, "n": 10}}
     fry     = {"iː": {"f1": 320, "f2": 2300, "n": 20}}
     bbc     = {"iː": {"f1": 300, "f2": 2250, "n": 5},
                "ɒ":  None}  # the bug case
-    out = mod.aggregate_modern_rp(lindsey, fry, bbc)
+    out = aggregate_modern_rp(lindsey, fry, bbc)
     assert "iː" in out
     assert out["iː"]["f1"] == round((280 + 320 + 300) / 3, 1)
     # /ɒ/ should be excluded (only 1 valid speaker, fewer than threshold of 2)
@@ -237,35 +231,23 @@ def test_regression_aggregate_modern_rp_with_none_phoneme():
 
 def test_regression_aggregate_with_only_one_valid_speaker():
     """If only 1 speaker has data for a phoneme, aggregate must skip it (needs ≥2)."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "rebuild",
-        Path(__file__).parent.parent.parent / "scripts/accent_coach_phase0_12_rebuild.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    from accent_coach.pipeline.centroids import aggregate_modern_rp
 
     lindsey = {"æ": {"f1": 750, "f2": 1700, "n": 5}}
     fry     = {}  # no data
     bbc     = {}  # no data
-    out = mod.aggregate_modern_rp(lindsey, fry, bbc)
+    out = aggregate_modern_rp(lindsey, fry, bbc)
     assert "æ" not in out, "phoneme with only 1 valid speaker should be excluded"
 
 
 @pytest.mark.parametrize("missing_value", [None, {}, {"f1": 100}])  # None | empty | malformed
 def test_regression_aggregate_robust_to_malformed(missing_value):
     """Aggregate must not crash on None / empty / partial-dict speaker data."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "rebuild",
-        Path(__file__).parent.parent.parent / "scripts/accent_coach_phase0_12_rebuild.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    from accent_coach.pipeline.centroids import aggregate_modern_rp
 
     lindsey = {"iː": {"f1": 280, "f2": 2200, "n": 10}}
     fry     = {"iː": {"f1": 320, "f2": 2300, "n": 20}}
     bbc     = {"iː": missing_value}
-    out = mod.aggregate_modern_rp(lindsey, fry, bbc)
+    out = aggregate_modern_rp(lindsey, fry, bbc)
     # Should not crash; iː should still aggregate from the 2 valid speakers
     assert "iː" in out

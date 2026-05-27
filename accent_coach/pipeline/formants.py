@@ -1,7 +1,52 @@
 from __future__ import annotations
 
+import subprocess
+import time
+from pathlib import Path
+
 import numpy as np
 import parselmouth
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_PYTHON = PROJECT_ROOT / ".venv/bin/python"
+
+
+def _ts() -> str:
+    return time.strftime("%H:%M:%S")
+
+
+def _log(msg: str) -> None:
+    print(f"[{_ts()}] {msg}", flush=True)
+
+
+def extract_formants(
+    manifest: Path,
+    out_csv: Path,
+    source_label: str = "synth_BC",
+    n_workers: int | None = None,
+) -> Path:
+    """Subprocess wrapper around accent_coach_extract_formants.py."""
+    manifest = Path(manifest)
+    out_csv = Path(out_csv)
+
+    if out_csv.exists():
+        _log(f"extract_formants: already exists at {out_csv.name}, skipping")
+        return out_csv
+
+    _log(f"extract_formants: starting (source_label={source_label!r}, manifest={manifest.parent.name})")
+    t0 = time.time()
+    r = subprocess.run(
+        [str(PROJECT_PYTHON), str(PROJECT_ROOT / "scripts/accent_coach_extract_formants.py"),
+         "--manifest",      str(manifest),
+         "--out",           str(out_csv),
+         "--source-label",  source_label],
+        cwd=str(PROJECT_ROOT),
+    )
+    elapsed = time.time() - t0
+    if r.returncode != 0:
+        raise RuntimeError(f"accent_coach_extract_formants.py failed (exit {r.returncode})")
+    _log(f"extract_formants: done in {elapsed:.0f}s → {out_csv.name}")
+    return out_csv
 
 from accent_coach.models import PhonemeInstance, VowelFeatures
 from accent_coach.pipeline.alignment import IPA_VOWELS

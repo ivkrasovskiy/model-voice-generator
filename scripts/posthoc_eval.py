@@ -30,12 +30,11 @@ warnings.filterwarnings("ignore")
 import numpy as np
 import soundfile as sf
 import torch
-from lib.identity import cosine, load_ecapa
+from lib.identity import cosine
 from lib.identity import embed_wav as compute_ecapa_emb
 from lib.inference import mps_reset as _mps_reset
 from lib.inference import split_to_short_segments
-from lib.metrics import compute_dnsmos, compute_wer, load_dnsmos
-from lib.transcribe import load_whisper
+from lib.scoring import load_scoring_models, score_single_wav
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -186,11 +185,10 @@ def evaluate_one(label: str, phrases, tts, whisper_model, ecapa, ecapa_ref_emb,
             saved.append(str(wav_path.relative_to(PROJECT_ROOT)))
             print(f"  saved → {wav_path.name}")
 
-        # Metrics
-        wer, hyp = compute_wer(prompt, wav_np, sr, whisper_model)
-        gen_emb = compute_ecapa_emb(wav_np, sr, ecapa)
-        ecapa_sim = cosine(ecapa_ref_emb, gen_emb)
-        mos = compute_dnsmos(wav_np, sr, dnsmos_session)
+        m = score_single_wav(wav_np, sr, prompt, whisper_model, ecapa, dnsmos_session, ecapa_ref_emb)
+        wer, hyp = m["wer"], m["transcript"]
+        ecapa_sim = m["ecapa_sim"]
+        mos = {"sig": m["dnsmos_sig"], "bak": m["dnsmos_bak"], "ovr": m["dnsmos_ovr"]}
         print(f"  {label}/{slug}: wer={wer:.3f} ecapa={ecapa_sim:.4f} "
               f"sig={mos['sig']:.2f} bak={mos['bak']:.2f} ovr={mos['ovr']:.2f}")
         if wer > 0.1:
@@ -336,9 +334,7 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
     F5-TTS is fully unloaded at this point — no MPS pressure.
     """
     print("\n=== PHASE 2: Scoring (Whisper + ECAPA + DNSMOS) ===")
-    whisper_model = load_whisper(device="cpu")
-    ecapa = load_ecapa(device="cpu")
-    dnsmos_session = load_dnsmos()
+    whisper_model, ecapa, dnsmos_session = load_scoring_models(device="cpu")
 
     # Default ref embedding (gen-vs-the-12s-narrator-clip). Used when no per-clip
     # real audio is available for a given phrase.
@@ -384,28 +380,23 @@ def phase2_score(manifest: list[dict], out_dir: Path) -> list[dict]:
             per_clip.append({**entry, **NAN_ROW})
             continue
 
-        # Each metric computed independently — one failure doesn't wipe the others
-        wer, hyp = (np.nan, "")
-        try:
-            wer, hyp = compute_wer(entry["prompt"], wav_np, sr, whisper_model)
-        except Exception as e:
-            print(f"    WER failed: {e}")
+        m = score_single_wav(wav_np, sr, entry["prompt"],
+                             whisper_model, ecapa, dnsmos_session, ecapa_ref_emb)
+        wer, hyp = m["wer"], m["transcript"]
+        mos = {"sig": m["dnsmos_sig"], "bak": m["dnsmos_bak"], "ovr": m["dnsmos_ovr"]}
 
-        ecapa_sim = np.nan
+        # Per-slug real audio ECAPA (per-slug emb replaces fixed ref) and centroid
+        ecapa_sim = m["ecapa_sim"]
         ecapa_centroid_sim = np.nan
         try:
             gen_emb = compute_ecapa_emb(wav_np, sr, ecapa)
-            ecapa_sim = cosine(ecapa_ref_emb, gen_emb)
+            slug = entry.get("slug", "")
+            if slug in per_slug_emb:
+                ecapa_sim = cosine(per_slug_emb[slug], gen_emb)
             if centroid_emb is not None:
                 ecapa_centroid_sim = cosine(centroid_emb, gen_emb)
         except Exception as e:
-            print(f"    ECAPA failed: {e}")
-
-        mos = {"sig": np.nan, "bak": np.nan, "ovr": np.nan}
-        try:
-            mos = compute_dnsmos(wav_np, sr, dnsmos_session)
-        except Exception as e:
-            print(f"    DNSMOS failed: {e}")
+            print(f"    ECAPA centroid failed: {e}")
 
         ecapa_str = f"ecapa={ecapa_sim:.4f}"
         if centroid_emb is not None:
