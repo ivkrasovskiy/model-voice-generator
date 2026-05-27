@@ -247,8 +247,8 @@ the headline number.
 
 1. Table: cell, per-phoneme target score (baseline → edited), composite Δ, DNSMOS Δ.
 2. **Decision row** evaluating stop criteria (§3.6).
-3. A 4-speaker plot using `accent_coach_phase0_10_plot.py` — strip and re-fit
-   to show `owner, real_BC, synth_BC[baseline], synth_BC[all5_edited]` on
+3. A 4-speaker plot (adapt `accent_coach_phase0_10_plot.py` from git history) —
+   show `owner, real_BC, synth_BC[baseline], synth_BC[all5_edited]` on
    Bark-normalised vowel space, highlighting the 5 target phonemes.
 
 ### 3.6. Stop criteria for Phase 0.13a (Lever B)
@@ -530,9 +530,9 @@ Expected: 4 rows in the output CSV (one per method); `bark_control` row has
    method does notably better or worse than Bark.
 4. **Vowel space plot** — one plot per method showing the 4 speakers
    `{owner, real_BC, synth_BC, modern_rp}` in that method's coordinate space.
-   Output: `docs/img/phase0_13c_norm_{method}.png`. Adapt
-   [scripts/accent_coach_phase0_10_plot.py](../scripts/accent_coach_phase0_10_plot.py)
-   for the new coordinate axes — do NOT modify the original plot script.
+   Output: `docs/img/phase0_13c_norm_{method}.png`. Adapt `accent_coach_phase0_10_plot.py`
+   (deleted in refactor — recover from git history) for the new coordinate axes
+   — write a new script, do NOT modify any production script.
 5. **Recommendation** — explicit GREEN/YELLOW/RED decision per §5.6 and the
    suggested follow-up (e.g. "switch in Phase 0.14" or "stay on Bark").
 
@@ -615,8 +615,8 @@ docs/
 2. **Do not use N=1 anywhere.** Every cell is N=3.
 3. **Do not write a new forced aligner.** `extract_formants` already produces
    per-token timing.
-4. **Do not write a new vowel-space plotter.** Adapt
-   [scripts/accent_coach_phase0_10_plot.py](../scripts/accent_coach_phase0_10_plot.py).
+4. **Do not write a new vowel-space plotter.** Adapt `accent_coach_phase0_10_plot.py`
+   from git history (`git show HEAD~2:scripts/accent_coach_phase0_10_plot.py`).
 5. **Do not edit `vendor/index-tts/`** — Lever A reuses the existing
    `--emo-audio` / `--emo-alpha` CLI flags already exposed in
    [scripts/indextts_gen.py:64-72](../scripts/indextts_gen.py#L64).
