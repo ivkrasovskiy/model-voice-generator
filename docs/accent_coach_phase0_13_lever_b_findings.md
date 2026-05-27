@@ -113,3 +113,34 @@ Run **Phase 0.13b (Lever A)** per §4 of the plan:
 ```
 
 Estimated wall time: ~8–13 hours CPU (9 cells × 3 reps × 19 clips × ~60–90 s/clip).
+
+---
+
+## 7. Phase 0.14 WS-A — Segment-Splice Validation (2026-05-27)
+
+**Question**: Does running WORLD only on a ±30 ms context window around each target
+segment (instead of the full clip) recover the DNSMOS quality loss observed in §1?
+
+**Method**: `cell_all5 --replicates 1 --splice` via Phase 0.14 `formant_shift.py` splice
+path. Baseline WAVs are the same (re-generated Phase 0.13 `cell_baseline_b` clips).
+Outputs written to `tts_output/accent_coach/phase0_14/cells/cell_all5/rep_0/`.
+
+**Results** (1 replicate):
+
+| Method | Composite | DNSMOS OVR | WER |
+|---|---|---|---|
+| Phase 0.13 full-resynth (3 reps) | 73.00 ± 2.48 | 2.211 | 0.019 |
+| Phase 0.14 splice (1 rep) | **74.70** | **2.633** | 0.018 |
+| Phase 0.13 baseline (no shift) | 67.53 | 2.578 | 0.014 |
+
+**Verdict**: **GREEN** — acceptance criterion met.
+- DNSMOS splice (2.633) ≥ full-resynth (2.211): **+0.422 pts recovered**
+- DNSMOS splice (2.633) is also *above* baseline (2.578), likely within 1-rep noise but
+  confirms the splice does not degrade naturalness relative to untouched audio.
+- Composite lift vs baseline: **+7.17 pts** (67.53 → 74.70), slightly better than
+  full-resynth's +5.47 pts — consistent with DNSMOS improvement feeding back into scoring.
+
+**Conclusion**: The global WORLD round-trip was the source of the DNSMOS penalty in
+Phase 0.13. Windowed splice (±30 ms context, 20 ms equal-power crossfade) eliminates
+that penalty while preserving the formant-shift composite gain. The splice path is the
+recommended default for Lever B going forward.
