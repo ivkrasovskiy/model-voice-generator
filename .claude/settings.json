@@ -2,13 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(uv *)",
+      "Bash(rtk *)",
       "Bash(.venv/bin/python *)",
       "Bash(.venv/bin/ruff *)",
-      "Bash(.venv_openvoice/bin/python *)",
       "Bash(vendor/index-tts/.venv/bin/python *)",
       "Bash(/Users/ivkrasovskii/model-voice-generator/.venv/bin/python *)",
       "Bash(/Users/ivkrasovskii/model-voice-generator/vendor/index-tts/.venv/bin/python *)",
-      "Bash(/Users/ivkrasovskii/model-voice-generator/.venv_openvoice/bin/python *)",
+      "Bash(bash scripts/check_repo.sh)",
       "WebSearch",
       "WebFetch(domain:arxiv.org)",
       "WebFetch(domain:github.com)",
@@ -16,13 +16,8 @@
       "Write",
       "Read",
       "Bash(python3 -m json.tool)",
-      "Bash(tee -a tts_output/accent_coach/cleaned_corpus/phase0_12_run.log)",
-      "Bash(mkdir -p accent_coach/dsp)",
-      "Bash(pkill -f \"accent_coach_phase0_13_lever_a\")",
-      "Bash(nohup .venv/bin/python scripts/accent_coach_phase0_13_lever_a.py --replicates 3 > /tmp/lever_a.log 2>&1 & *)",
       "Bash(git check-ignore *)",
-      "Bash(rm \\\\ *)",
-      "Bash(/usr/bin/find tts_output/accent_coach -path '*/phase0_*' -name '*.wav' -delete)"
+      "Bash(bash /Users/ivkrasovskii/model-voice-generator/scripts/check_repo.sh)"
     ],
     "additionalDirectories": [
       "/private/tmp",

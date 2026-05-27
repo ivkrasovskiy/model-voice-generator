@@ -6,7 +6,7 @@ Guidance for Claude Code when working in this repo.
 
 Generate Benedict Cumberbatch's voice from text. Current production model is
 **IndexTTS-2 zero-shot** with a 14 s interview reference clip
-(`tts_output/ref_interview.wav`, sourced from
+(`tts_output/refs/production/ref_interview.wav`, sourced from
 [youtu.be/cHmkAStZBkc](https://youtu.be/cHmkAStZBkc) at 4:47-5:01) and
 **`num_beams=5`** (Phase 0.9 finding — raises H4 Bark piecewise from 74.6 → 82.1).
 No fine-tuning involved.
@@ -23,7 +23,13 @@ driven by `scripts/accent_coach_*.py`. Read these only if you're working on
 that feature: full spec in
 [docs/accent_coach_technical_spec.md](docs/accent_coach_technical_spec.md),
 sequenced Phase 0 execution plan in
-[docs/accent_coach_plan.md](docs/accent_coach_plan.md).
+[docs/accent_coach_plan.md](docs/accent_coach_plan.md), phase history
+(outcomes of all completed phases 0.5–0.12) in
+[docs/accent_coach_history.md](docs/accent_coach_history.md).
+
+**Active experiment**: Phase 0.13 (Lever B formant shifting + Lever A emo
+conditioning). Drivers: `scripts/accent_coach_phase0_13_lever_b.py`,
+`scripts/accent_coach_phase0_13_lever_a.py`.
 
 ## Hardware
 
@@ -47,7 +53,34 @@ cd vendor/index-tts && uv sync --no-dev
 | `.venv/` | `uv sync` | Scoring (Whisper, ECAPA, DNSMOS), notebooks |
 | `vendor/index-tts/.venv/` | `cd vendor/index-tts && uv sync --no-dev` | IndexTTS-2 inference |
 
-Lint: `uv run ruff check scripts/` must be zero errors before commits.
+Lint: `uv run ruff check scripts/ accent_coach/` must be zero errors before commits.
+
+## Code layout
+
+```
+accent_coach/
+  pipeline/          # generate.py, formants.py, centroids.py, experiment.py (re-exporter)
+  dsp/               # formant_shift.py (Lever B DSP)
+  diagnostics/       # f3_normalization.py, bark_distance.py
+  reference/         # rp_norms.py — RP vowel targets
+scripts/
+  lib/               # scoring.py (WER/ECAPA/DNSMOS), transcribe.py, identity.py, metrics.py
+  indextts_gen.py    # batch TTS generation
+  posthoc_eval.py    # score a manifest (calls lib/scoring.py)
+  accent_coach_phase0_13_*.py  — active Phase 0.13 drivers
+tts_output/
+  refs/              # reference WAVs (never overwrite)
+    production/      # ref_interview.wav (IndexTTS-2 spk ref)
+    indextts_baseline/ # ref_narrator.wav (smoke test + ECAPA ref)
+  eval_indextts_v2/  # locked baseline WAVs + scores.regression_baseline.csv
+  cross_eval_50/     # eval_short.csv, eval_long.csv
+  accent_coach/      # per-phase cell outputs, centroids (see CENTROIDS.md)
+```
+
+**Shared scoring**: all WER/ECAPA/DNSMOS logic lives in `scripts/lib/scoring.py`.
+Use `score_clips(manifest, ecapa_ref, out_csv)` for batch scoring or
+`load_scoring_models()` + `score_single_wav()` for live per-clip scoring.
+Never load Whisper/ECAPA/DNSMOS primitives directly in driver scripts.
 
 ## IndexTTS-2 install pins (DO NOT bump without verifying smoke test)
 
@@ -116,7 +149,8 @@ Asserts `cas_01` and `sher_03` hit WER ≤ 0.10 and ECAPA ≥ 0.74. ~2 minutes.
 Locked artifacts (never overwrite):
 - `tts_output/eval_indextts_v2/` — baseline generated WAVs
 - `tts_output/eval_indextts_v2/scores.regression_baseline.csv` — baseline scores
-- `tts_output/ref_interview.wav` — production reference clip
+- `tts_output/refs/production/ref_interview.wav` — production reference clip
+- `tts_output/refs/indextts_baseline/ref_narrator.wav` — smoke test + ECAPA ref
 
 ## Eval results (current state)
 
@@ -142,6 +176,15 @@ reference clips are audiobook BC, so the metric measures distance from
 audiobook register. Listen-test confirmed identity is preserved and the
 audiobook creak is removed. See [docs/history.md](docs/history.md) for full
 context.
+
+## Code standards
+
+- **≤ 400 code lines per file** — if a script grows past this, split into a lib module.
+- **Ruff clean** — `uv run ruff check scripts/ accent_coach/` must pass.
+- **Tests green** — `uv run pytest tests/ -q` must pass (30 tests).
+- **Smoke test** — run `vendor/index-tts/.venv/bin/python scripts/indextts_smoke_test.py`
+  before and after any change touching IndexTTS-2 paths.
+- Run all three with `bash scripts/check_repo.sh` before declaring a stage done.
 
 ## Conventions
 
@@ -171,8 +214,8 @@ Sub-agents start cold and must respect the tooling already set up here:
   `codegraph_context`, `codegraph_node` over grep / find scans. Falls back
   to grep only when the symbol is not indexed (e.g. fresh code).
 - **Do not touch** `vendor/`, `tts_output/eval_indextts_v2/`,
-  `tts_output/ref_interview.wav` — locked baseline artifacts. If a sub-agent
-  is asked to "look around" it should treat these as read-only.
+  `tts_output/refs/` — locked baseline artifacts. If a sub-agent is asked
+  to "look around" it should treat these as read-only.
 
 <!-- rtk-instructions v2 -->
 # RTK (Rust Token Killer) - Token-Optimized Commands
