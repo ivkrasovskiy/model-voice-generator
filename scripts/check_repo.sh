@@ -18,12 +18,8 @@ fi
 
 echo ""
 echo "=== line-count guard (≤400 code lines per file) ==="
-# Excluded from limit: legacy corpus-build and F5-TTS eval scripts that
-# predate this rule, are stable, and won't be actively developed.
-EXCLUDE="scripts/accent_coach_build_real_bc.py|scripts/posthoc_eval.py"
 while IFS= read -r -d '' f; do
     rel="${f#$REPO_ROOT/}"
-    if echo "$rel" | grep -qE "$EXCLUDE"; then continue; fi
     lines=$(grep -c . "$f" || true)
     if [ "$lines" -gt 400 ]; then
         echo "  ✗ $rel has $lines lines (limit 400)"

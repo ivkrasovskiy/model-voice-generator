@@ -28,6 +28,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 import soundfile as sf
 
+from scripts.lib.whisperx_helpers import transcribe_diarize
+
 DEFAULT_PRIMARY = "https://youtu.be/cHmkAStZBkc"
 DEFAULT_SECONDARY = "https://www.youtube.com/watch?v=UKfBtgDSCzw"
 DEFAULT_REF = "tts_output/refs/production/ref_interview.wav"
@@ -142,134 +144,6 @@ def _group_by_gap(words: list[dict], gap_ms: float = 200.0) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# WhisperX helpers
-# ---------------------------------------------------------------------------
-
-def _whisperx_transcribe_diarize(wav_path: Path, hf_token: str) -> list[dict]:
-    """Transcribe + diarize. Returns list of word-dicts with 'speaker' field."""
-    import functools
-
-    import torch
-    import whisperx
-
-    # PyTorch 2.6+ changed weights_only=True default. Pyannote/speechbrain checkpoints
-    # use omegaconf types across multiple submodules — enumerating them all is fragile.
-    # Patch torch.load to default weights_only=False for this trusted official checkpoint.
-
-    _orig_load = torch.load
-    @functools.wraps(_orig_load)
-    def _patched_load(*args, **kwargs):
-        # lightning_fabric passes weights_only=None which PyTorch 2.8 treats as True.
-        # Coerce None → False for trusted official checkpoints.
-        if kwargs.get("weights_only") is None:
-            kwargs["weights_only"] = False
-        return _orig_load(*args, **kwargs)
-    torch.load = _patched_load
-
-    device = "cpu"
-    words_cache = wav_path.parent / f"{wav_path.stem}_words.json"
-
-    if words_cache.exists():
-        print(f"  [whisperx] loading cached words from {words_cache.name} …", flush=True)
-        words_flat = json.load(words_cache.open())
-    else:
-        audio = whisperx.load_audio(str(wav_path))
-
-        print("  [whisperx] loading model medium (int8) …", flush=True)
-        model = whisperx.load_model("medium", device=device, language="en",
-                                    compute_type="int8")
-        result = model.transcribe(audio, batch_size=8, verbose=True)
-
-        print("  [whisperx] aligning …", flush=True)
-        model_a, metadata = whisperx.load_align_model(language_code="en", device=device)
-        result = whisperx.align(
-            result["segments"], model_a, metadata, audio, device=device,
-            return_char_alignments=False,
-        )
-
-        words_flat = []
-        for seg in result.get("segments", []):
-            for w in seg.get("words", []):
-                if "start" not in w or "end" not in w:
-                    continue
-                words_flat.append({
-                    "start": float(w["start"]),
-                    "end": float(w["end"]),
-                    "word": w.get("word", "").strip(),
-                    "speaker": "UNKNOWN",
-                })
-        words_cache.write_text(json.dumps(words_flat))
-        print(f"  [whisperx] cached {len(words_flat)} words → {words_cache.name}", flush=True)
-
-    # Replace pyannote diarization with ECAPA sliding-window speaker ID.
-    # pyannote/speaker-diarization-3.1 is a gated model requiring accepted user conditions.
-    # For a two-speaker interview where BC is the dominant speaker, ECAPA sliding window
-    # is sufficient and requires no network access or gated model agreement.
-    print("  [ecapa] sliding-window speaker ID (skipping pyannote diarization) …", flush=True)
-
-    # ECAPA sliding-window: label each word by the speaker of its 3s window
-    wav_np, wav_sr = sf.read(str(wav_path))
-    if wav_np.ndim > 1:
-        wav_np = wav_np.mean(axis=1)
-    wav_np = wav_np.astype(np.float32)
-    return _ecapa_assign_speakers(words_flat, wav_np, wav_sr)
-
-
-def _ecapa_assign_speakers(
-    words: list[dict], wav: np.ndarray, sr: int,
-    window_s: float = 3.0, stride_s: float = 1.5,
-) -> list[dict]:
-    """Label each word dict with 'speaker' = 'BC' or 'OTHER' via ECAPA windows."""
-    from scripts.lib.identity import embed_wav, load_ecapa
-
-    ref_wav, ref_sr = sf.read(str(PROJECT_ROOT / DEFAULT_REF))
-    if ref_wav.ndim > 1:
-        ref_wav = ref_wav.mean(axis=1)
-    ref_emb = embed_wav(ref_wav.astype(np.float32), ref_sr, load_ecapa())
-
-    total_s = len(wav) / sr
-    window_sims: dict[float, float] = {}  # start_s → cosine sim
-
-    t = 0.0
-    while t + window_s <= total_s:
-        chunk = wav[int(t * sr):int((t + window_s) * sr)]
-        emb = embed_wav(chunk, sr)
-        sim = float(np.dot(emb.flatten(), ref_emb.flatten()) /
-                    (np.linalg.norm(emb) * np.linalg.norm(ref_emb) + 1e-9))
-        window_sims[t] = sim
-        t += stride_s
-
-    window_starts = sorted(window_sims)
-
-    def _sim_at(word_mid: float) -> float:
-        if not window_starts:
-            return 0.0
-        closest = min(window_starts, key=lambda s: abs(s + window_s / 2 - word_mid))
-        return window_sims[closest]
-
-    result = []
-    for w in words:
-        mid = (w["start"] + w["end"]) / 2
-        sim = _sim_at(mid)
-        result.append({**w, "speaker": "BC" if sim >= 0.45 else "OTHER"})
-
-    bc_n = sum(1 for w in result if w["speaker"] == "BC")
-    print(f"    ECAPA: {bc_n}/{len(result)} words assigned to BC", flush=True)
-
-    # Flatten word list — all speakers present, build_real_bc picks BC by ECAPA cos to ref
-    words_with_speaker = []
-    for seg in result:
-        words_with_speaker.append({
-            "start": seg["start"],
-            "end": seg["end"],
-            "word": seg["word"],
-            "speaker": seg["speaker"],
-        })
-    return words_with_speaker
-
-
-
-# ---------------------------------------------------------------------------
 # ECAPA speaker identification
 # ---------------------------------------------------------------------------
 
@@ -357,9 +231,8 @@ def build_real_bc(
                 _resample_to_16k(actual_tmp, raw_wav)
             actual_tmp.unlink(missing_ok=True)
 
-        # Transcribe + diarize
         print(f"Transcribing + diarizing {source_name} …", flush=True)
-        words = _whisperx_transcribe_diarize(raw_wav, hf_token)
+        words = transcribe_diarize(raw_wav, hf_token)
         if not words:
             print(f"  WARNING: no words found in {source_name}", flush=True)
             continue
