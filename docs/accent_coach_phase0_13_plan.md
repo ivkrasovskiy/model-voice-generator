@@ -8,7 +8,7 @@
 
 ## 0. Context (one paragraph)
 
-Phase 0.10 ([findings](accent_coach_phase0_10_findings.md)) swept GPT + CFM params
+Phase 0.10 ([findings](accent_coach_history.md#phase-010)) swept GPT + CFM params
 (N=3 Optuna, 35 trials). Verdict: RED. Best `composite_lindsey_mean = 62.10`
 (gate 82), best `composite_BC_mean = 70.80` (gate 75). Phase 0.11 swept
 full-sentence Fry emo clips at `emo_alpha ∈ {0.3, 0.5, 0.7, 1.0}` and Phase 0.12
@@ -18,7 +18,7 @@ After cleanup, the cross-speaker matrix shows `synth_BC vs modern_rp = 75.4`,
 phonemes (`/ʌ/, /ʊ/, /ɔː/, /aʊ/, /ɜː/`) where real BC scores 86–100 but synth
 scores 30–59. Param sweep + emo sweep have shown a ~2–3 pt ceiling. Phase 0.13
 tests two remaining levers from the
-[Phase 0.10 findings §"Remaining TTS accent levers"](accent_coach_phase0_10_findings.md#remaining-tts-accent-levers).
+[Phase 0.10 findings §"Remaining TTS accent levers"](accent_coach_history.md#phase-010#remaining-tts-accent-levers).
 
 **Order chosen: Lever B before Lever A.** Lever B is deterministic, cheap to
 build (no generation budget), and yields a ceiling number that gates Lever A.
@@ -42,7 +42,7 @@ run in parallel with A and B, in any order, and is gated on nothing.
 | Phrases | `tts_output/accent_coach/cal_25.csv` | Same as Phase 0.10/0.11 — apples-to-apples |
 | Replicates per cell | **N=3** | No N=1 anywhere |
 | Centroid overlay | `tts_output/accent_coach/cleaned_corpus/speaker_centroids_cleaned.json` | Phase 0.12 output; `load_baseline_centroids()` picks it up automatically |
-| Failing phonemes (5) | `/ʌ/, /ʊ/, /ɔː/, /aʊ/, /ɜː/` (STRUT, FOOT, THOUGHT, MOUTH, NURSE) | From [Phase 0.10 findings §Cross-speaker validation](accent_coach_phase0_10_findings.md#cross-speaker-validation-matrix-phase-012) |
+| Failing phonemes (5) | `/ʌ/, /ʊ/, /ɔː/, /aʊ/, /ɜː/` (STRUT, FOOT, THOUGHT, MOUTH, NURSE) | From [Phase 0.10 findings §Cross-speaker validation](accent_coach_history.md#phase-010#cross-speaker-validation-matrix-phase-012) |
 | sigma_rp | from `{fry, lindsey, bbc_male}` cluster | Same as Phase 0.10 |
 | ECAPA reference | `tts_output/ref_narrator.wav` | Per-clip refs unavailable |
 | Primary target | `modern_rp` (cleaned) | Use lindsey + real_BC + fry as diagnostic targets |

@@ -13,34 +13,34 @@ import numpy as np
 # duration >= 50 ms.  Sources: modern_rp_fry (n=9109 tokens), modern_rp_lindsey
 # (n=1910), modern_rp_bbc_male (n=2473; Phase E filter_male decision).
 # Supersedes RP_VOWEL_F1_F2_MALE_LEGACY (Deterding 1997) — see
-# docs/accent_coach_phase0_5_findings.md for the supersession rationale.
+# docs/accent_coach_history.md#phase-05 for the supersession rationale.
 # ---------------------------------------------------------------------------
 RP_VOWEL_F1_F2_MALE_MODERN: dict[str, tuple[float, float]] = {
-    "iː": (348, 1962),   # FLEECE   — n=749; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "ɪ":  (386, 1773),   # KIT      — n=2440; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "ɛ":  (462, 1571),   # DRESS    — n=1113; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "æ":  (545, 1496),   # TRAP     — n=718; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "ɑː": (518, 1215),   # BATH/PALM — n=564; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
+    "iː": (348, 1962),   # FLEECE   — n=749; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "ɪ":  (386, 1773),   # KIT      — n=2440; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "ɛ":  (462, 1571),   # DRESS    — n=1113; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "æ":  (545, 1496),   # TRAP     — n=718; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "ɑː": (518, 1215),   # BATH/PALM — n=564; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     "ɒ":  (600, 900),    # LOT      — NO DATA in modern_rp corpus; keeping Deterding 1997 approx
-    "ɔː": (459, 1138),   # THOUGHT  — n=647; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "ʊ":  (386, 1427),   # FOOT     — n=174; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "uː": (352, 1506),   # GOOSE    — n=597; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "ʌ":  (472, 1339),   # STRUT    — n=497; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "ɜː": (482, 1440),   # NURSE    — n=310; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "ə":  (412, 1550),   # SCHWA    — n=3146; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
+    "ɔː": (459, 1138),   # THOUGHT  — n=647; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "ʊ":  (386, 1427),   # FOOT     — n=174; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "uː": (352, 1506),   # GOOSE    — n=597; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "ʌ":  (472, 1339),   # STRUT    — n=497; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "ɜː": (482, 1440),   # NURSE    — n=310; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "ə":  (412, 1550),   # SCHWA    — n=3146; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     # Diphthongs: onglide values (initial position)
-    "eɪ": (383, 1873),   # FACE onglide  — n=817; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "aɪ": (482, 1599),   # PRICE onglide — n=824; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "ɔɪ": (429, 1560),   # CHOICE onglide — n=56; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "əʊ": (389, 1353),   # GOAT onglide  — n=539; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
-    "aʊ": (536, 1304),   # MOUTH onglide — n=301; modern_rp_fry+lindsey+bbc_male; see accent_coach_phase0_7_findings.md
+    "eɪ": (383, 1873),   # FACE onglide  — n=817; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "aɪ": (482, 1599),   # PRICE onglide — n=824; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "ɔɪ": (429, 1560),   # CHOICE onglide — n=56; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "əʊ": (389, 1353),   # GOAT onglide  — n=539; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
+    "aʊ": (536, 1304),   # MOUTH onglide — n=301; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
 }
 
 # ---------------------------------------------------------------------------
 # LEGACY — Deterding 1997 (kept for historical comparison, not used by product)
 # Deterding 1997, Table 1, "The formants of monophthong vowels in Standard
 # Southern British English pronunciation", JIPA 27(1-2), pp. 47-55.
-# Superseded by RP_VOWEL_F1_F2_MALE_MODERN — see accent_coach_phase0_5_findings.md
+# Superseded by RP_VOWEL_F1_F2_MALE_MODERN — see docs/accent_coach_history.md#phase-05
 # ---------------------------------------------------------------------------
 RP_VOWEL_F1_F2_MALE_LEGACY: dict[str, tuple[float, float]] = {
     "iː": (280, 2249),   # FLEECE   — Deterding 1997, Table 1
