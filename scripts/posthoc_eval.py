@@ -32,8 +32,13 @@ import soundfile as sf
 import torch
 from lib.identity import cosine
 from lib.identity import embed_wav as compute_ecapa_emb
-from lib.inference import mps_reset as _mps_reset
-from lib.inference import split_to_short_segments
+from lib.posthoc_helpers import (
+    GenSettings,
+    aggregate,
+    apply_checkpoint,
+    compute_ref_centroid,
+    gen_with_retry,
+)
 from lib.scoring import load_scoring_models, score_single_wav
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -80,147 +85,8 @@ EVAL_PHRASES = [
 ]
 
 
-# ---------- posthoc-specific helpers ----------
-
-def apply_checkpoint(tts, ckpt_path: Path) -> int:
-    """Load a partial fine-tune checkpoint into tts.ema_model.transformer."""
-    checkpoint = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
-    sd = checkpoint["model"]
-    model = tts.ema_model.transformer
-    own = model.state_dict()
-    n_loaded = 0
-    for k, v in sd.items():
-        key = k.replace("transformer.", "", 1) if k.startswith("transformer.") else k
-        if key in own:
-            own[key] = v.to(own[key].device)
-            n_loaded += 1
-    model.load_state_dict(own, strict=False)
-    return n_loaded
-
-
-def _gen_segment_with_retry(tts, segment: str, max_retries: int = 5):
-    """Single-segment generation reading module-level inference knobs."""
-    speed = 0.3 if _SPEED_FIX and len(segment.encode("utf-8")) < 10 else 1.0
-    if speed != 1.0:
-        print(f"      speed-fix: len={len(segment.encode('utf-8'))} bytes → speed={speed}")
-    for attempt in range(1, max_retries + 1):
-        wav, sr, _ = tts.infer(
-            ref_file=str(REF_AUDIO), ref_text=REF_TEXT, gen_text=segment,
-            cfg_strength=_CFG_STRENGTH, nfe_step=_NFE_STEP,
-            speed=speed,
-            seed=_SEED + (attempt - 1),
-            selective_cfg_threshold=_SELECTIVE_CFG,
-        )
-        w = np.asarray(wav.squeeze() if hasattr(wav, "squeeze") else wav, dtype=np.float32)
-        finite = np.isfinite(w).all()
-        peak = float(np.abs(w[np.isfinite(w)]).max()) if finite else 0.0
-        _mps_reset()
-        if finite and peak > 0.01:
-            return w, sr
-        print(f"      attempt {attempt}: {'NaN/Inf' if not finite else f'SILENT peak={peak:.4f}'}")
-    return None, None
-
-
-def gen_with_retry(tts, text: str, max_retries: int = 5):
-    """Split text → generate per-segment → concatenate with 150 ms silence."""
-    segments = split_to_short_segments(text, max_chars=50)
-    if len(segments) == 1:
-        return _gen_segment_with_retry(tts, segments[0], max_retries=max_retries)
-    print(f"    split into {len(segments)} segments (≤50 chars each)")
-    pieces, sr_out = [], None
-    for i, seg in enumerate(segments, 1):
-        wav_np, sr = _gen_segment_with_retry(tts, seg, max_retries=max_retries)
-        if wav_np is None:
-            print(f"    segment {i}/{len(segments)} FAILED — abort")
-            return None, None
-        print(f"    segment {i}/{len(segments)} ok  ({len(wav_np)/sr:.1f}s, peak={float(np.abs(wav_np).max()):.3f})")
-        pieces.append(wav_np)
-        if sr_out is None:
-            sr_out = sr
-        pieces.append(np.zeros(int(0.15 * sr), dtype=np.float32))
-    return np.concatenate(pieces[:-1]), sr_out
-
-
-def compute_ref_centroid(centroid_dir: Path, n_samples: int, ecapa, seed: int) -> np.ndarray:
-    """Embed N random WAVs from centroid_dir and average → speaker identity centroid."""
-    import random
-
-    from lib.audio_io import read_wav_mono
-
-    wav_dir = centroid_dir / "wavs" if (centroid_dir / "wavs").is_dir() else centroid_dir
-    wavs = sorted(wav_dir.glob("*.wav"))
-    if len(wavs) < n_samples:
-        raise RuntimeError(f"Only {len(wavs)} WAVs in {wav_dir}, need {n_samples}")
-    picked = random.Random(seed).sample(wavs, n_samples)
-    print(f"  centroid: averaging {n_samples} ECAPA embeddings from {wav_dir.name}/")
-    embs = [compute_ecapa_emb(*read_wav_mono(p), ecapa) for p in picked]
-    centroid = np.mean(np.stack(embs, axis=0), axis=0)
-    print(f"  centroid norm={np.linalg.norm(centroid):.3f}  "
-          f"(single-clip avg norm={np.mean([np.linalg.norm(e) for e in embs]):.3f})")
-    return centroid
-
 
 # ---------- main pipeline ----------
-
-def evaluate_one(label: str, phrases, tts, whisper_model, ecapa, ecapa_ref_emb,
-                 dnsmos_session, out_dir: Path, save_wavs: bool):
-    """Generate + score one config (baseline or one checkpoint).
-
-    Returns dict with mean/std for each metric, plus saved WAV paths.
-    """
-    rows = []
-    saved = []
-    for slug, prompt in phrases:
-        wav_np, sr = gen_with_retry(tts, prompt)
-        if wav_np is None:
-            print(f"  {label}/{slug}: GENERATION FAILED")
-            rows.append({"slug": slug, "wer": np.nan, "ecapa_sim": np.nan,
-                         "dnsmos_sig": np.nan, "dnsmos_bak": np.nan, "dnsmos_ovr": np.nan,
-                         "transcript": ""})
-            continue
-
-        if save_wavs:
-            wav_path = out_dir / f"{label}_{slug}.wav"
-            sf.write(str(wav_path), wav_np, sr)
-            saved.append(str(wav_path.relative_to(PROJECT_ROOT)))
-            print(f"  saved → {wav_path.name}")
-
-        m = score_single_wav(wav_np, sr, prompt, whisper_model, ecapa, dnsmos_session, ecapa_ref_emb)
-        wer, hyp = m["wer"], m["transcript"]
-        ecapa_sim = m["ecapa_sim"]
-        mos = {"sig": m["dnsmos_sig"], "bak": m["dnsmos_bak"], "ovr": m["dnsmos_ovr"]}
-        print(f"  {label}/{slug}: wer={wer:.3f} ecapa={ecapa_sim:.4f} "
-              f"sig={mos['sig']:.2f} bak={mos['bak']:.2f} ovr={mos['ovr']:.2f}")
-        if wer > 0.1:
-            print(f"    (whisper heard: \"{hyp[:80]}\")")
-        rows.append({"slug": slug, "wer": wer, "ecapa_sim": ecapa_sim,
-                     "dnsmos_sig": mos["sig"], "dnsmos_bak": mos["bak"], "dnsmos_ovr": mos["ovr"],
-                     "transcript": hyp})
-
-    return rows, saved
-
-
-def aggregate(rows: list[dict]) -> dict:
-    def m(key):
-        vals = [r[key] for r in rows if not np.isnan(r[key])]
-        if not vals:
-            return float("nan"), float("nan"), 0
-        return float(np.mean(vals)), float(np.std(vals)), len(vals)
-
-    w_mean, w_std, n = m("wer")
-    e_mean, e_std, _ = m("ecapa_sim")
-    ec_mean, ec_std, _ = m("ecapa_centroid_sim")
-    sig_mean, _, _ = m("dnsmos_sig")
-    bak_mean, _, _ = m("dnsmos_bak")
-    ovr_mean, _, _ = m("dnsmos_ovr")
-    return {
-        "n_scored": n,
-        "wer_mean": w_mean, "wer_std": w_std,
-        "ecapa_sim_mean": e_mean, "ecapa_sim_std": e_std,
-        "ecapa_centroid_mean": ec_mean, "ecapa_centroid_std": ec_std,
-        "dnsmos_sig_mean": sig_mean, "dnsmos_bak_mean": bak_mean, "dnsmos_ovr_mean": ovr_mean,
-    }
-
 
 def phase1_generate(listen_ckpts: list[Path], out_dir: Path, device: str,
                     skip_baseline: bool) -> list[dict]:
@@ -306,7 +172,12 @@ def phase1_generate(listen_ckpts: list[Path], out_dir: Path, device: str,
                 print(f"  applied {n_loaded} tensors")
             current_label = label
 
-        wav_np, sr = gen_with_retry(tts, prompt)
+        _settings = GenSettings(
+            ref_audio=str(REF_AUDIO), ref_text=REF_TEXT,
+            cfg_strength=_CFG_STRENGTH, nfe_step=_NFE_STEP, seed=_SEED,
+            speed_fix=_SPEED_FIX, selective_cfg=_SELECTIVE_CFG or 0.0,
+        )
+        wav_np, sr = gen_with_retry(tts, prompt, _settings)
         wav_path = out_dir / f"{label}_{slug}.wav"
         if wav_np is None:
             print(f"  {label}/{slug}: GENERATION FAILED")

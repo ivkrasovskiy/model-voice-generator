@@ -268,22 +268,6 @@ def _ecapa_assign_speakers(
     return words_with_speaker
 
 
-def _whisperx_transcribe_diarize_unused(wav_path: Path, hf_token: str) -> list[dict]:
-    """Original pyannote path — kept for reference, not called."""
-    # Flatten to word list with start/end/word/speaker
-    words = []
-    for seg in []:
-        for w in seg.get("words", []):
-            if "start" not in w or "end" not in w:
-                continue
-            words.append({
-                "start": float(w["start"]),
-                "end": float(w["end"]),
-                "word": w.get("word", "").strip(),
-                "speaker": w.get("speaker", "SPEAKER_00"),
-            })
-    return words
-
 
 # ---------------------------------------------------------------------------
 # ECAPA speaker identification
