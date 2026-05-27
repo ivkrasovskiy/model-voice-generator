@@ -17,7 +17,12 @@
       "Read",
       "Bash(python3 -m json.tool)",
       "Bash(git check-ignore *)",
-      "Bash(bash /Users/ivkrasovskii/model-voice-generator/scripts/check_repo.sh)"
+      "Bash(bash /Users/ivkrasovskii/model-voice-generator/scripts/check_repo.sh)",
+      "Bash(claude mcp *)",
+      "Bash(codegraph init *)",
+      "Bash(codegraph sync *)",
+      "Bash(codegraph index *)",
+      "Bash(codegraph serve *)"
     ],
     "additionalDirectories": [
       "/private/tmp",
