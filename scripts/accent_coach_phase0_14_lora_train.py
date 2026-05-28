@@ -13,7 +13,11 @@ Device: mps (falls back to cpu on unsupported-op error).
 from __future__ import annotations
 
 import argparse
+import contextlib
+import gc
 import json
+import math
+import resource
 import sys
 import time
 from pathlib import Path
@@ -62,13 +66,13 @@ def _pick_ref(items: list[dict], exclude_wav: str) -> str | None:
     return random.choice(same_spk)
 
 
-def _build_lora_model(tts, device: str, train_mel_head: bool = False):
+def _build_lora_model(tts, device: str, train_mel_head: bool = False, lora_r: int = 16):
     """Apply LoRA to tts.gpt.gpt (HF GPT2). Returns peft_model."""
     from peft import LoraConfig, get_peft_model
 
     lora_cfg = LoraConfig(
-        r=16,
-        lora_alpha=32,
+        r=lora_r,
+        lora_alpha=lora_r * 2,
         target_modules=["c_attn", "c_proj", "c_fc"],
         lora_dropout=0.05,
         bias="none",
@@ -92,18 +96,29 @@ def _build_lora_model(tts, device: str, train_mel_head: bool = False):
     return peft_model
 
 
-def _train_step(tts, batch: dict, optimizer, scaler=None) -> float:
+def _train_step(tts, batch: dict, optimizer, grad_accum: int = 1, scaler=None) -> float | None:
     from lib.lora_targets import gpt_ce_loss
     loss = gpt_ce_loss(tts.gpt, batch)
+    loss_val = loss.item()
+    if not math.isfinite(loss_val):
+        return None  # skip backward — don't corrupt accumulated gradients
+    scaled = loss / grad_accum
     if scaler is not None:
-        scaler.scale(loss).backward()
+        scaler.scale(scaled).backward()
     else:
-        loss.backward()
-    return loss.item()
+        scaled.backward()
+    # Per-step inner clip: caps each sample's gradient contribution to norm ≤ 1.0.
+    # Without this, a single outlier clip (observed grad_norms up to 46K) biases AdamW
+    # m2 estimates for all subsequent steps → eventual NaN from 0/0 in the Adam denominator.
+    torch.nn.utils.clip_grad_norm_(
+        [p for p in tts.gpt.parameters() if p.requires_grad and p.grad is not None], 1.0
+    )
+    return loss_val
 
 
-def _eval_loss(tts, val_items: list[dict], device: str, n_eval: int = 50) -> float:
-    from lib.lora_targets import extract_targets
+def _eval_loss(tts, val_items: list[dict], device: str,
+               n_eval: int = 50, cache_dir=None) -> float:
+    from lib.lora_targets import extract_targets, gpt_ce_loss
     tts.gpt.eval()
     losses: list[float] = []
     eval_items = val_items[:n_eval]
@@ -113,10 +128,11 @@ def _eval_loss(tts, val_items: list[dict], device: str, n_eval: int = 50) -> flo
             if ref is None:
                 continue
             try:
-                batch = extract_targets(tts, item["wav"], item["text"], ref, device)
-                from lib.lora_targets import gpt_ce_loss
+                batch = extract_targets(tts, item["wav"], item["text"], ref, device,
+                                        cache_dir=cache_dir)
                 loss = gpt_ce_loss(tts.gpt, batch)
                 losses.append(loss.item())
+                del batch
             except Exception as e:
                 _log(f"  eval skip {Path(item['wav']).name}: {e}")
     tts.gpt.train()
@@ -136,12 +152,13 @@ def _run_training(
         [p for p in tts.gpt.parameters() if p.requires_grad],
         lr=args.lr,
     )
-    warmup_steps = 50
+    warmup_steps = 20 if args.dry_run else 50
     def lr_lambda(step: int) -> float:
         return min(1.0, step / max(warmup_steps, 1))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-    grad_accum = 16
+    # dry-run: small accum so we get updates within 32 clips; full: 16 for stability
+    grad_accum = 4 if args.dry_run else 16
     step = 0
     best_eval_loss = float("inf")
     t0_run = time.time()
@@ -151,7 +168,8 @@ def _run_training(
     optimizer.zero_grad()
 
     epoch = 0
-    max_epochs = 1 if args.dry_run else args.epochs
+    # dry-run: loop many epochs until the 200-step check fires (32 clips × 7 epochs ≈ 224 steps)
+    max_epochs = 50 if args.dry_run else args.epochs
     dry_run_items = items_cycle[:32] if args.dry_run else items_cycle
 
     while epoch < max_epochs:
@@ -165,26 +183,83 @@ def _run_training(
             if ref is None:
                 continue
             try:
-                batch = extract_targets(tts, item["wav"], item["text"], ref, device)
-                loss_val = _train_step(tts, batch, optimizer)
+                batch = extract_targets(
+                    tts, item["wav"], item["text"], ref, device,
+                    cache_dir=args.cache_dir,
+                )
+                loss_val = _train_step(tts, batch, optimizer, grad_accum=grad_accum)
+                del batch
             except Exception as e:
                 _log(f"  skip {Path(item['wav']).name}: {e}")
                 continue
 
-            if (step + 1) % grad_accum == 0:
-                torch.nn.utils.clip_grad_norm_(
-                    [p for p in tts.gpt.parameters() if p.requires_grad], 1.0
-                )
-                optimizer.step()
-                scheduler.step()
+            if loss_val is None:
+                # NaN/Inf forward — clear any partial grads and skip this sample
+                _log(f"  NaN loss skipped: {Path(item['wav']).name}")
                 optimizer.zero_grad()
+                step += 1
+                continue
+
+            # Cheap per-step check: did this backward introduce NaN into any gradient?
+            # Check one representative parameter (lora_B of layer 0, typically first updated).
+            _first_p = next((p for p in tts.gpt.parameters() if p.requires_grad), None)
+            if _first_p is not None and _first_p.grad is not None and not torch.isfinite(_first_p.grad).all():
+                _log(f"  backward NaN: {Path(item['wav']).name} step={step} — zeroing grads")
+                optimizer.zero_grad()
+                step += 1
+                continue
+
+            if (step + 1) % grad_accum == 0:
+                # Full NaN/Inf check on ALL accumulated grads before stepping
+                _corrupt = next((n for n, p in tts.gpt.named_parameters()
+                                 if p.requires_grad and p.grad is not None
+                                 and not torch.isfinite(p.grad).all()), None)
+                if _corrupt is not None:
+                    _log(f"  corrupt grads ({_corrupt}) at step {step} — skipping optimizer step")
+                    optimizer.zero_grad()
+                else:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        [p for p in tts.gpt.parameters() if p.requires_grad], 1.0
+                    )
+                    _log(f"  opt_step grad_norm={grad_norm:.3f} (step {step})")
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad()
+                    # Detect NaN parameters produced by this optimizer step
+                    nan_p = next((n for n, p in tts.gpt.named_parameters()
+                                  if p.requires_grad and torch.isnan(p).any()), None)
+                    if nan_p is not None:
+                        _log(f"  FATAL: param {nan_p} is NaN after optimizer step — stopping")
+                        return
 
             step += 1
 
+            # MPS holds freed tensors in a pool until empty_cache().
+            # synchronize() first drains the command queue so pending-op refs are released;
+            # without it, empty_cache() can't reclaim those pages and the pool keeps growing.
             if step % 20 == 0:
+                gc.collect()
+                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    torch.mps.synchronize()
+                    torch.mps.empty_cache()
+
+            log_every = 5 if args.dry_run else 20
+            if step % log_every == 0:
                 elapsed = time.time() - t0_run
-                _log(f"  step={step} loss={loss_val:.4f} lr={scheduler.get_last_lr()[0]:.2e} "
-                     f"({elapsed/60:.1f} min, {step/(elapsed/60):.1f} steps/min)")
+                mem_info = ""
+                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    with contextlib.suppress(Exception):
+                        live = torch.mps.current_allocated_memory() / 1e9
+                        pool = torch.mps.driver_allocated_memory() / 1e9
+                        mem_info = f" mps_live={live:.2f}GB mps_pool={pool:.2f}GB"
+                with contextlib.suppress(Exception):
+                    # ru_maxrss: bytes on macOS, kilobytes on Linux
+                    ru = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                    rss_gb = ru / 1e9 if sys.platform == "darwin" else ru / 1e6
+                    mem_info += f" rss={rss_gb:.2f}GB"
+                loss_str = f"{loss_val:.4f}" if loss_val is not None else "nan(skipped)"
+                _log(f"  step={step} loss={loss_str} lr={scheduler.get_last_lr()[0]:.2e} "
+                     f"({elapsed/60:.1f} min, {step/(elapsed/60):.1f} steps/min{mem_info})")
 
             if args.dry_run and step >= 200:
                 _log("Dry-run: 200 steps reached. Inspect loss trend above.")
@@ -195,7 +270,7 @@ def _run_training(
                 ckpt_dir.mkdir(parents=True, exist_ok=True)
                 tts.gpt.gpt.save_pretrained(str(ckpt_dir))
                 _log(f"  checkpoint → {ckpt_dir}")
-                eval_l = _eval_loss(tts, val_items, device)
+                eval_l = _eval_loss(tts, val_items, device, cache_dir=args.cache_dir)
                 _log(f"  eval_loss={eval_l:.4f} (best={best_eval_loss:.4f})")
                 if eval_l < best_eval_loss:
                     best_eval_loss = eval_l
@@ -216,10 +291,17 @@ def main() -> int:
                         default="tts_output/accent_coach/phase0_14/lora/dataset")
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lora-r", type=int, default=16,
+                        help="LoRA rank (default 16; try 8 if loss unstable)")
     parser.add_argument("--train-mel-head", action="store_true",
                         help="Also fine-tune mel_head (default OFF for run 1)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Run 32 clips for 200 steps; confirm loss decreases")
+    parser.add_argument("--cache-dir", type=Path, default=None,
+                        help="Dir of pre-extracted .pt embeddings (from cache_embeddings.py); "
+                             "skips Whisper encoder during training — faster + less RAM")
+    parser.add_argument("--device", default=None,
+                        help="Force device: 'cpu' or 'mps'. Default: auto (mps if available)")
     args = parser.parse_args()
 
     dataset_dir = PROJECT_ROOT / args.dataset_dir
@@ -230,17 +312,17 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    # Device selection: try mps, fall back to cpu
-    try:
-        if torch.backends.mps.is_available():
-            device = "mps"
-            _log("Device: mps")
-        else:
+    # Device selection
+    if args.device:
+        device = args.device
+        _log(f"Device: {device} (forced via --device)")
+    else:
+        try:
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            _log(f"Device: {device}")
+        except Exception:
             device = "cpu"
-            _log("Device: cpu (mps not available)")
-    except Exception:
-        device = "cpu"
-        _log("Device: cpu (mps probe failed)")
+            _log("Device: cpu (mps probe failed)")
 
     _log("Loading IndexTTS2...")
     try:
@@ -256,7 +338,7 @@ def main() -> int:
             raise
 
     _log("Applying LoRA...")
-    _build_lora_model(tts, device, train_mel_head=args.train_mel_head)
+    _build_lora_model(tts, device, train_mel_head=args.train_mel_head, lora_r=args.lora_r)
 
     train_items = _load_dataset(train_path)
     val_items = _load_dataset(val_path) if val_path.exists() else []

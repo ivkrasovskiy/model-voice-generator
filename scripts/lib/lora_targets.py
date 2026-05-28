@@ -44,14 +44,25 @@ def _load_wav_16k(path: str | Path, device: str = "cpu") -> torch.Tensor:
 
 def _emb_from_wav(tts, wav_16k: torch.Tensor) -> torch.Tensor:
     """Run extract_features + get_emb, return (1, T, 1024) float32."""
+    # extract_features (Whisper processor) calls .numpy() internally — must receive CPU tensor.
+    # get_emb runs on whatever device the model lives on (may be MPS) — move there after.
     inputs = tts.extract_features(
-        wav_16k, sampling_rate=16000, return_tensors="pt"
+        wav_16k.cpu(), sampling_rate=16000, return_tensors="pt"
     )
-    input_features = inputs["input_features"].to(wav_16k.device)
-    attention_mask = inputs["attention_mask"].to(wav_16k.device)
+    model_device = next(tts.gpt.parameters()).device
+    input_features = inputs["input_features"].to(model_device)
+    attention_mask = inputs["attention_mask"].to(model_device)
     with torch.no_grad():
         emb = tts.get_emb(input_features, attention_mask)
     return emb
+
+
+def _load_from_cache(cache_dir: Path, wav_path: str | Path) -> dict | None:
+    """Load pre-computed (mel_codes, spk_emb) from cache. Returns None on miss."""
+    p = cache_dir / (Path(wav_path).stem + ".pt")
+    if p.exists():
+        return torch.load(p, map_location="cpu", weights_only=True)
+    return None
 
 
 @torch.no_grad()
@@ -61,6 +72,7 @@ def extract_targets(
     text: str,
     spk_ref_path: str | Path,
     device: str = "cpu",
+    cache_dir: Path | None = None,
 ) -> dict[str, torch.Tensor]:
     """Return training tensors for one (wav, text) example.
 
@@ -69,25 +81,45 @@ def extract_targets(
     tts          : loaded IndexTTS2 instance
     wav_path     : path to the target clip (whose semantic codes become the label)
     text         : transcript of wav_path (used for text_tokens)
-    spk_ref_path : a DIFFERENT clip from the same speaker (not wav_path itself);
-                   avoids self-conditioning which lets the GPT copy rather than
-                   generalise to text
+    spk_ref_path : a DIFFERENT clip from the same speaker (not wav_path itself)
     device       : "cpu" or "mps"
+    cache_dir    : directory of pre-extracted .pt files (from cache_embeddings script);
+                   if set and both files exist, skips all Whisper encoder calls
     """
     # --- text tokens ---
     text_token_list = tts.tokenizer.tokenize(text)
     text_ids = tts.tokenizer.convert_tokens_to_ids(text_token_list)
     text_tokens = torch.tensor(text_ids, dtype=torch.int32, device=device).unsqueeze(0)
 
-    # --- mel codes (semantic integer indices, the training label) ---
-    wav_16k = _load_wav_16k(wav_path, device)
-    emb = _emb_from_wav(tts, wav_16k)
-    # VERIFIED: quantize returns (int_codes, quant_emb); int_codes is int64, shape (1, T)
-    mel_codes, _ = tts.semantic_codec.quantize(emb)  # (1, T) int64, values 0..8191
+    # --- mel codes + speaker conditioning ---
+    # Fast path: load pre-extracted embeddings from disk (no Whisper encoder call)
+    if cache_dir is not None:
+        target = _load_from_cache(cache_dir, wav_path)
+        ref    = _load_from_cache(cache_dir, spk_ref_path)
+        if target is not None and ref is not None:
+            mel_codes    = target["mel_codes"]   # (1, T) int64, CPU
+            spk_cond_emb = ref["spk_emb"]        # (1, T', 1024) float32, CPU
+            emo_cond_emb = spk_cond_emb
+            return {
+                "text_tokens":  text_tokens,
+                "mel_codes":    mel_codes,
+                "spk_cond_emb": spk_cond_emb,
+                "emo_cond_emb": emo_cond_emb,
+            }
 
-    # --- speaker conditioning (from a different clip) ---
-    ref_16k = _load_wav_16k(spk_ref_path, device)
+    # Slow path: compute on-the-fly (used when cache is absent or incomplete)
+    # Always load audio on CPU: feature extractors (Whisper, semantic_codec) call
+    # .numpy() internally and fail on MPS tensors. gpt_ce_loss moves batch to model device.
+    wav_16k = _load_wav_16k(wav_path, "cpu")
+    spk_emb_target = _emb_from_wav(tts, wav_16k)
+    del wav_16k
+    # VERIFIED: quantize returns (int_codes, quant_emb); int_codes is int64, shape (1, T)
+    mel_codes, quant_emb = tts.semantic_codec.quantize(spk_emb_target)
+    del spk_emb_target, quant_emb
+
+    ref_16k = _load_wav_16k(spk_ref_path, "cpu")
     spk_cond_emb = _emb_from_wav(tts, ref_16k)   # (1, T', 1024)
+    del ref_16k
     emo_cond_emb = spk_cond_emb                   # IndexTTS2 default: emo = spk ref
 
     return {
@@ -115,10 +147,13 @@ def gpt_ce_loss(gpt, batch: dict[str, torch.Tensor]) -> torch.Tensor:
     emo_emb      = batch["emo_cond_emb"].to(device)  # (1, T', 1024)
 
     # Speaker conditioning: (1, T', 1024) → (1, 32, model_dim)
-    spk_cond = gpt.get_conditioning(spk_emb.transpose(1, 2))
+    # conformer_perceiver type needs explicit lengths for make_pad_mask
+    spk_len = torch.tensor([spk_emb.shape[1]], dtype=torch.long, device=device)
+    spk_cond = gpt.get_conditioning(spk_emb.transpose(1, 2), cond_mel_lengths=spk_len)
 
     # Emotion conditioning
-    emo_vec_ori = gpt.get_emo_conditioning(emo_emb.transpose(1, 2))
+    emo_len = torch.tensor([emo_emb.shape[1]], dtype=torch.long, device=device)
+    emo_vec_ori = gpt.get_emo_conditioning(emo_emb.transpose(1, 2), cond_mel_lengths=emo_len)
     emo_vec_syn = gpt.emovec_layer(emo_vec_ori)
     emo_vec     = gpt.emo_layer(emo_vec_syn)
 
