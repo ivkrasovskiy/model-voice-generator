@@ -60,7 +60,16 @@
       "Bash(kill 80469)",
       "Bash(kill 94480)",
       "Bash(xargs kill -9)",
-      "Bash(kill 3698)"
+      "Bash(kill 3698)",
+      "Bash(tee /tmp/mps_grad_diag.log)",
+      "Bash(tee /tmp/lora_eval_base.log)",
+      "Bash(tee /tmp/lora_eval_lora.log)",
+      "Bash(tee /tmp/bath_base.log)",
+      "Bash(tee /tmp/bath_lora.log)",
+      "Bash(tee /tmp/lora_retrain_ep3.log)",
+      "Bash(pkill -f \"accent_coach_phase0_14_lora_train.py\")",
+      "Bash(rm -f \\\\ *)",
+      "Bash(tee /tmp/bath_step300.log)"
     ],
     "additionalDirectories": [
       "/private/tmp",
@@ -69,7 +78,8 @@
       "/Users/ivkrasovskii/model-voice-generator/accent_coach",
       "/tmp",
       "/Users/ivkrasovskii/model-voice-generator/docs",
-      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_14/accent_probe"
+      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_14/accent_probe",
+      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_14/lora/bath_base"
     ]
   }
 }

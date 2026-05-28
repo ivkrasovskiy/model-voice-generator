@@ -1,5 +1,4 @@
 """Inspect cached embeddings for the 3 known NaN-causing clips."""
-import sys
 from pathlib import Path
 
 import torch

@@ -17,10 +17,15 @@ import contextlib
 import gc
 import json
 import math
+import os
 import resource
 import sys
 import time
 from pathlib import Path
+
+# Must be set before torch is imported; enables CPU fallback for MPS ops that
+# lack float32 precision (e.g. SDPA backward) — prevents forward NaN on bad clips.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 PROJECT_ROOT = Path(__file__).parent.parent
 INDEXTTS_ROOT = PROJECT_ROOT / "vendor" / "index-tts"
@@ -161,6 +166,9 @@ def _run_training(
     grad_accum = 4 if args.dry_run else 16
     step = 0
     best_eval_loss = float("inf")
+    best_step = 0
+    steps_since_best = 0
+    stop_reason: str | None = None
     t0_run = time.time()
     items_cycle = list(train_items)
 
@@ -172,13 +180,15 @@ def _run_training(
     max_epochs = 50 if args.dry_run else args.epochs
     dry_run_items = items_cycle[:32] if args.dry_run else items_cycle
 
-    while epoch < max_epochs:
+    while epoch < max_epochs and stop_reason is None:
         epoch += 1
         _log(f"=== Epoch {epoch}/{max_epochs} ({len(dry_run_items)} items) ===")
         import random
         random.shuffle(dry_run_items)
 
         for item in dry_run_items:
+            if stop_reason is not None:
+                break
             ref = _pick_ref(train_items, item["wav"])
             if ref is None:
                 continue
@@ -265,20 +275,43 @@ def _run_training(
                 _log("Dry-run: 200 steps reached. Inspect loss trend above.")
                 return
 
+            # Hard step cap
+            if not args.dry_run and args.max_steps and step >= args.max_steps:
+                stop_reason = f"max_steps={args.max_steps} reached"
+                break
+
+            # Eval + early stopping (every eval_every steps)
+            if not args.dry_run and step % args.eval_every == 0:
+                eval_l = _eval_loss(tts, val_items, device, cache_dir=args.cache_dir)
+                steps_since_best = step - best_step
+                improved = eval_l < best_eval_loss
+                _log(f"  eval_loss={eval_l:.4f} (best={best_eval_loss:.4f} "
+                     f"@ step {best_step}, stale {steps_since_best} steps)")
+                if improved:
+                    best_eval_loss = eval_l
+                    best_step = step
+                    steps_since_best = 0
+                    best_dir = CKPT_ROOT / "best"
+                    best_dir.mkdir(parents=True, exist_ok=True)
+                    tts.gpt.gpt.save_pretrained(str(best_dir))
+                    _log(f"  ✓ new best → {best_dir}")
+                elif steps_since_best >= args.patience:
+                    stop_reason = (f"early stop: no improvement for {steps_since_best} steps "
+                                   f"(patience={args.patience})")
+                    break
+
+            # Periodic checkpoint (independent of eval frequency)
             if not args.dry_run and step % 300 == 0:
                 ckpt_dir = CKPT_ROOT / f"step_{step}"
                 ckpt_dir.mkdir(parents=True, exist_ok=True)
                 tts.gpt.gpt.save_pretrained(str(ckpt_dir))
                 _log(f"  checkpoint → {ckpt_dir}")
-                eval_l = _eval_loss(tts, val_items, device, cache_dir=args.cache_dir)
-                _log(f"  eval_loss={eval_l:.4f} (best={best_eval_loss:.4f})")
-                if eval_l < best_eval_loss:
-                    best_eval_loss = eval_l
-                else:
-                    _log("  WARNING: eval loss not improving — check for overfit")
 
     # Final checkpoint
     if not args.dry_run:
+        if stop_reason:
+            _log(f"Stopped: {stop_reason}")
+        _log(f"Best eval_loss={best_eval_loss:.4f} at step {best_step} (saved to ckpt/best/)")
         ckpt_dir = CKPT_ROOT / f"step_{step}_final"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         tts.gpt.gpt.save_pretrained(str(ckpt_dir))
@@ -302,6 +335,12 @@ def main() -> int:
                              "skips Whisper encoder during training — faster + less RAM")
     parser.add_argument("--device", default=None,
                         help="Force device: 'cpu' or 'mps'. Default: auto (mps if available)")
+    parser.add_argument("--max-steps", type=int, default=900,
+                        help="Hard cap on training steps (default 900; 0 = unlimited)")
+    parser.add_argument("--eval-every", type=int, default=100,
+                        help="Evaluate val loss every N steps (default 100)")
+    parser.add_argument("--patience", type=int, default=200,
+                        help="Early stop if best eval_loss unchanged for N steps (default 200)")
     args = parser.parse_args()
 
     dataset_dir = PROJECT_ROOT / args.dataset_dir

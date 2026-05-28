@@ -82,6 +82,10 @@ def extract_formants(
             # Alignment
             phonemes = align_audio(clip_path, transcript, sentence_id=0)
 
+            # RP corrections: strip non-rhotic coda-R; relabel BATH æ→ɑː; LOT ɑː→ɒ
+            from accent_coach.pipeline.rp_postprocess import apply_rp_corrections
+            phonemes = apply_rp_corrections(phonemes)
+
             # Load audio for formant extraction
             audio, sr = sf.read(str(clip_path))
             if audio.ndim > 1:

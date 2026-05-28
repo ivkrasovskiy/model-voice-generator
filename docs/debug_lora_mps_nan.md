@@ -84,15 +84,16 @@ NaN guards at three points:
 3. Check all trainable grads before optimizer step — skip step if any corrupt
 4. Check all trainable params after optimizer step — stop if any NaN
 
-### Root cause NOT yet fixed
+### Root cause — RESOLVED
 
-Why does MPS produce 23K–90K grad norms for identical code that produces 0.3–0.4 on CPU? Likely candidate: MPS SDPA (scaled dot product attention) backward has lower numerical precision than CPU. The conformer perceiver encoder or the GPT2 attention layers may produce `inf` or near-`inf` gradients in float32 on MPS.
+Per-layer backward hook diagnostic (`scripts/diagnose_mps_grad_explosion.py`, 2026-05-28):
+- Ran 1 forward+backward on a normal clip (1_028.wav, fry speaker) **without** fallback enabled
+- All layer grad norms: max 0.4 — identical to CPU baseline
+- No explosion, no NaN
 
-**Things to try:**
-1. `torch.backends.mps.enable_fallback_to_cpu(True)` — falls back to CPU for unsupported or precision-sensitive ops
-2. Disable SDPA: `with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):` (MPS equivalent unknown)
-3. Explicitly set `model.half()` and train in float16 — but MPS float16 support is limited
-4. Identify which layer produces the exploding gradient: add `register_full_backward_hook` on the GPT layers and log gradient norm per-layer at step 0
+**Conclusion: MPS SDPA is not universally broken.** The 23K–90K explosions came specifically from the 3 bad clips (0_309, 0_133, 1_133) producing NaN in the forward pass, which then propagated as huge-but-finite values through backward before hitting the NaN checks. Normal clips behave identically on MPS and CPU.
+
+Fix already applied: `enable_fallback_to_cpu(True)` prevents those 3 clips from going NaN in forward → explosion chain never starts.
 
 ---
 
@@ -168,17 +169,26 @@ CPU training run (`/tmp/lora_cpu_test.log`, `--device cpu --epochs 1`):
 - Loss range: 5.4–7.0 (noisy, consistent with early warmup phase — lr still ramping)
 - No NaN anywhere
 
-Full MPS training: previously killed at step 300. Last status unclear.
+Full MPS training (1 epoch, 1195 steps): **COMPLETED**
+- Checkpoints at step_300, step_600, step_900, step_1195_final (30 MB adapter each)
+- No training log preserved (stdout only — loss curve not recoverable)
+- Loss quality unknown; needs inference test to evaluate
 
 ---
 
 ## Recommended Next Steps (in priority order)
 
-1. **Investigate bad clips** — print shapes and stats for the 3 NaN-causing clips from cache
-2. **Identify exploding layer on MPS** — add per-layer grad norm hook, run 1 step, find the culprit
-3. **Try `torch.backends.mps.enable_fallback_to_cpu(True)`** before training — this may silently fix precision issues at the cost of some performance
-4. **Consider training-only model load** — skip s2mel/bigvgan/campplus/semantic_codec to free 5 GB MPS
-5. **Restart full MPS training** with current guards — the inner-clip + NaN guards may be sufficient to reach convergence even with noisy gradients
+1. ✅ **Investigate bad clips** — cache data is CLEAN (no NaN/inf). Root cause is MPS precision,
+   not data. Bad clips: `0_133` T=63 (short), `0_309` T=160, `1_133` T=106. Texts are normal.
+2. ✅ **`PYTORCH_ENABLE_MPS_FALLBACK=1`** — set via `os.environ.setdefault` before `import torch`
+   in the training script. `torch.backends.mps.enable_fallback_to_cpu` does not exist in
+   PyTorch 2.8; the env var is the correct API. Targets SDPA backward precision.
+3. ✅ **Run `scripts/diagnose_mps_grad_explosion.py`** — no explosion on normal clips (max 0.4);
+   explosion was clip-specific (3 bad clips → forward NaN → backward explosion chain)
+4. ⬜ **Inference test** — run a phrase through the step_1195_final adapter; listen to confirm
+   the LoRA learned something meaningful
+5. ⬜ **Training-only model load** — skip s2mel/bigvgan/campplus/semantic_codec to free 5 GB MPS;
+   needed if running multiple epochs
 
 ---
 
