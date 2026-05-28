@@ -92,13 +92,13 @@ def main() -> int:
     col = 10
 
     print("\n" + "=" * (36 + col * len(labels)))
-    print(f"{'Metric':<36}" + "".join(f"{l:>{col}}" for l in labels))
+    print(f"{'Metric':<36}" + "".join(f"{lbl:>{col}}" for l in labels))
     print("-" * (36 + col * len(labels)))
 
     # Overall dist-to-RP
-    overall = {l: _avg_dist_to_rp(c) for l, c in runs}
+    overall = {lbl: _avg_dist_to_rp(c) for lbl, c in runs}
     row = f"{'dist_to_RP  (all vowels, Bark)':<36}"
-    row += "".join(f"{overall[l]:>{col}.3f}" for l in labels)
+    row += "".join(f"{overall[lbl]:>{col}.3f}" for l in labels)
     print(row)
 
     # Per-vowel rows
@@ -107,13 +107,13 @@ def main() -> int:
             continue
         f1t, f2t = RP[ph]
         dists = {}
-        for l, cent in runs:
+        for lbl, cent in runs:
             v = cent.get(ph)
-            dists[l] = _bark_dist(v["f1"], v["f2"], f1t, f2t) if v else float("nan")
+            dists[lbl] = _bark_dist(v["f1"], v["f2"], f1t, f2t) if v else float("nan")
         best = min((d for d in dists.values() if not np.isnan(d)), default=float("nan"))
         row = f"  {name+' ('+ph+')':<34}"
-        for l in labels:
-            d = dists[l]
+        for lbl in labels:
+            d = dists[lbl]
             marker = " *" if (not np.isnan(d) and abs(d - best) < 0.001) else "  "
             row += f"{d:>{col-2}.3f}{marker}"
         print(row)
@@ -121,20 +121,20 @@ def main() -> int:
     print("=" * (36 + col * len(labels)))
 
     # Winner
-    best_label = min(overall, key=lambda l: overall[l])
+    best_label = min(overall, key=lambda l: overall[lbl])
     print(f"\nClosest to modern RP: {best_label} (dist={overall[best_label]:.3f} Bark)")
 
     # Raw BATH centroids
-    print(f"\nRaw BATH (ɑː) centroids  [RP target F1=518 F2=1215]:")
-    for l, cent in runs:
+    print("\nRaw BATH (ɑː) centroids  [RP target F1=518 F2=1215]:")
+    for lbl, cent in runs:
         v = cent.get("ɑː")
         if v:
             print(f"  {l:<20} F1={v['f1']:.0f}  F2={v['f2']:.0f}  n={v.get('n', '?')}")
         else:
             print(f"  {l:<20} ɑː not found")
 
-    print(f"\nRaw TRAP (æ) centroids   [RP target F1=545 F2=1496]:")
-    for l, cent in runs:
+    print("\nRaw TRAP (æ) centroids   [RP target F1=545 F2=1496]:")
+    for lbl, cent in runs:
         v = cent.get("æ")
         if v:
             print(f"  {l:<20} F1={v['f1']:.0f}  F2={v['f2']:.0f}  n={v.get('n', '?')}")
