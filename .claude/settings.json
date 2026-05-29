@@ -69,7 +69,15 @@
       "Bash(tee /tmp/lora_retrain_ep3.log)",
       "Bash(pkill -f \"accent_coach_phase0_14_lora_train.py\")",
       "Bash(rm -f \\\\ *)",
-      "Bash(tee /tmp/bath_step300.log)"
+      "Bash(tee /tmp/bath_step300.log)",
+      "Bash([ -f \"$MANIFEST\" ])",
+      "Bash(tee /tmp/bath_score_corrected.log)",
+      "Bash(tee /tmp/lora_train_es.log)",
+      "Bash(tee /tmp/bath_best_gen.log)",
+      "Bash(tee /tmp/bath_score_final.log)",
+      "Bash(tee /tmp/cross50_gen_base.log)",
+      "Bash(tee /tmp/cross50_gen_lora.log)",
+      "Bash(tee /tmp/score_rp_all.log)"
     ],
     "additionalDirectories": [
       "/private/tmp",

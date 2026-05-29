@@ -55,6 +55,7 @@ def _resolve_path(raw_path: str) -> Path:
 def extract_formants(
     manifest_path: Path, out_csv: Path, source_label: str,
     label_from_manifest: bool = False,
+    apply_rp_corrections: bool = True,
 ) -> None:
     from accent_coach.pipeline.alignment import align_audio
     from accent_coach.pipeline.formants import extract_vowel_features
@@ -83,8 +84,10 @@ def extract_formants(
             phonemes = align_audio(clip_path, transcript, sentence_id=0)
 
             # RP corrections: strip non-rhotic coda-R; relabel BATH æ→ɑː; LOT ɑː→ɒ
-            from accent_coach.pipeline.rp_postprocess import apply_rp_corrections
-            phonemes = apply_rp_corrections(phonemes)
+            # Skipped for non-RP speakers (e.g. owner voice) via apply_rp_corrections=False
+            if apply_rp_corrections:
+                from accent_coach.pipeline.rp_postprocess import apply_rp_corrections as _rp
+                phonemes = _rp(phonemes)
 
             # Load audio for formant extraction
             audio, sr = sf.read(str(clip_path))
