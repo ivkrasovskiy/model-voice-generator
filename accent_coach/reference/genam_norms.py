@@ -68,9 +68,43 @@ _GENAM_FEMALE: dict[str, tuple[float, float]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Men — MODERN connected-speech GenAm (Phase 0.16)
+# Pooled MEDIAN F1/F2 from tts_output/genam_lecture_corpus (Huberman + Harris +
+# Sapolsky, 3 modern male GA speakers, dur>=50ms), measured by the SAME pipeline
+# and measurement point as RP_VOWEL_F1_F2_MALE_MODERN — steady-state for
+# diphthongs (NOT Hillenbrand's onset nucleus), connected speech (not /hVd/).
+# Supersedes _GENAM_MALE (Hillenbrand 1995) which is citation-form + 30 yr stale
+# (archaic un-fronted GOOSE, onset-convention diphthongs). See
+# docs/accent_coach_phase0_16_results.md.  Derived by
+# scripts/accent_coach_build_genam_norms.py.
+# ---------------------------------------------------------------------------
+_GENAM_MALE_MODERN: dict[str, tuple[float, float]] = {
+    "iː": (285, 2105),   # FLEECE — n=162
+    "ɪ":  (369, 1718),   # KIT — n=505
+    "ɛ":  (497, 1534),   # DRESS — n=211
+    "æ":  (645, 1561),   # TRAP — n=135
+    "ɑː": (556, 1142),   # BATH/PALM/LOT — n=134
+    "ɒ":  (556, 1142),   # LOT→ɑː (GenAm LOT–PALM merger; same as ɑː)
+    "ɔː": (550, 1009),   # THOUGHT — n=113
+    "ʊ":  (399, 1325),   # FOOT — n=31
+    "uː": (316, 1301),   # GOOSE — n=165 (FRONTED — modern GA, vs Hillenbrand 997)
+    "ʌ":  (505, 1234),   # STRUT — n=105
+    "ɜː": (422, 1255),   # NURSE/ɝ — n=42
+    "ə":  (393, 1471),   # SCHWA — n=646
+    "eɪ": (385, 1965),   # FACE onset — n=176 (steady-state)
+    "aɪ": (545, 1550),   # PRICE — n=190 (steady-state, vs Hillenbrand onset)
+    "ɔɪ": (550, 1009),   # CHOICE — approx from THOUGHT (sparse); # TODO(cite)
+    "əʊ": (429, 1095),   # GOAT — n=116 (steady-state, vs Hillenbrand onset)
+    "aʊ": (628, 1191),   # MOUTH — n=63
+}
+
+
 def get_genam_norms(mean_f0: float) -> dict[str, tuple[float, float]]:
     """Return sex-appropriate GenAm F1/F2 table based on estimated speaker f0.
 
+    Male path uses MODERN connected-speech norms (Phase 0.16); female path keeps
+    Hillenbrand 1995 until a female GA corpus exists (mirrors get_rp_norms).
     Mirrors the signature of get_rp_norms in rp_norms.py.
     """
-    return _GENAM_MALE if mean_f0 < 165 else _GENAM_FEMALE
+    return _GENAM_MALE_MODERN if mean_f0 < 165 else _GENAM_FEMALE

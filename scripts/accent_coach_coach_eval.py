@@ -44,7 +44,8 @@ SOURCES: list[tuple[str, Path, bool]] = [
     ("gen_base",      PROJECT_ROOT / "tts_output/cross_eval_50/gen_base/formants_gen_base.csv", True),
     ("gen_lora_best", PROJECT_ROOT / "tts_output/cross_eval_50/gen_lora_best/formants_gen_lora_best.csv", True),
     ("real_bc",       PROJECT_ROOT / "tts_output/real_bc_corpus/formants_real_bc.csv", True),
-    ("genam",         PROJECT_ROOT / "tts_output/genam_corpus/formants_genam.csv", False),
+    ("genam_lecture", PROJECT_ROOT / "tts_output/genam_lecture_corpus/formants_genam_lecture.csv", False),
+    ("genam_vsauce",  PROJECT_ROOT / "tts_output/genam_corpus/formants_genam.csv", False),
     ("owner",         PROJECT_ROOT / "tts_output/owner_cal_50/formants.csv", False),
 ]
 
@@ -58,7 +59,8 @@ EXPECT: dict[str, dict[str, str]] = {
     "bbc":           {"target": "RP", "rhotic": "non_rhotic"},
     "gen_base":      {"target": "RP", "rhotic": "non_rhotic"},
     "real_bc":       {"target": "RP", "rhotic": "non_rhotic"},
-    "genam":         {"target": "GenAm", "rhotic": "rhotic"},
+    "genam_lecture": {"target": "GenAm", "rhotic": "rhotic"},   # in-sample (norm speakers)
+    "genam_vsauce":  {"target": "GenAm", "rhotic": "rhotic"},   # HELD-OUT validation
 }
 
 
