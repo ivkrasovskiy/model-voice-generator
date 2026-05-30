@@ -79,3 +79,23 @@ def apply_rp_corrections(phonemes: list[PhonemeInstance]) -> list[PhonemeInstanc
     phonemes = relabel_bath(phonemes)
     phonemes = relabel_lot(phonemes)
     return phonemes
+
+
+def apply_accent_corrections(
+    phonemes: list[PhonemeInstance], target: str = "rp",
+) -> list[PhonemeInstance]:
+    """Dispatch CMU-alignment corrections by target accent.
+
+      - ``"rp"``    → strip non-rhotic coda-R, relabel BATH (æ→ɑː) and LOT (ɑː→ɒ).
+      - ``"genam"`` → identity. WhisperX uses the American CMU dictionary, so its
+                      output is already GenAm-appropriate: rhotic coda-R is real,
+                      BATH stays /æ/, LOT stays /ɑː/ (LOT-THOUGHT merger handled in
+                      genam_norms by mapping ɒ→ɑː). Applying RP corrections here
+                      would destroy exactly the features that define GenAm.
+      - ``"none"``  → identity (raw measurement, e.g. owner voice).
+    """
+    if target == "rp":
+        return apply_rp_corrections(phonemes)
+    if target in ("genam", "none"):
+        return phonemes
+    raise ValueError(f"unknown accent target: {target!r} (expected rp|genam|none)")

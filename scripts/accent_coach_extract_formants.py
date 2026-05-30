@@ -56,6 +56,7 @@ def extract_formants(
     manifest_path: Path, out_csv: Path, source_label: str,
     label_from_manifest: bool = False,
     apply_rp_corrections: bool = True,
+    target: str = "rp",
 ) -> None:
     from accent_coach.pipeline.alignment import align_audio
     from accent_coach.pipeline.formants import extract_vowel_features
@@ -83,11 +84,15 @@ def extract_formants(
             # Alignment
             phonemes = align_audio(clip_path, transcript, sentence_id=0)
 
-            # RP corrections: strip non-rhotic coda-R; relabel BATH æ→ɑː; LOT ɑː→ɒ
-            # Skipped for non-RP speakers (e.g. owner voice) via apply_rp_corrections=False
-            if apply_rp_corrections:
-                from accent_coach.pipeline.rp_postprocess import apply_rp_corrections as _rp
-                phonemes = _rp(phonemes)
+            # Accent corrections dispatched by target:
+            #   rp    → strip non-rhotic coda-R; relabel BATH æ→ɑː; LOT ɑː→ɒ
+            #   genam → identity (CMU is already American; keep rhotic R + æ)
+            #   none  → identity (raw measurement, e.g. owner)
+            # apply_rp_corrections=False forces "none" for backward compatibility.
+            eff_target = target if apply_rp_corrections else "none"
+            if eff_target != "none":
+                from accent_coach.pipeline.rp_postprocess import apply_accent_corrections
+                phonemes = apply_accent_corrections(phonemes, target=eff_target)
 
             # Load audio for formant extraction
             audio, sr = sf.read(str(clip_path))
@@ -98,11 +103,19 @@ def extract_formants(
             # Formant extraction (uses Phase 0 params: voiced_frac≥35%, F1≤900Hz, auto pitch ceil)
             vowel_features = extract_vowel_features(audio, sr, phonemes)
 
+            # Map each phoneme's start_time → the following phoneme label, so vowels
+            # can be tagged with next_phoneme. A vowel with next_phoneme == "r" is a
+            # rhotic (pre-coda-R) context — kept under target=genam, stripped under rp.
+            next_of: dict[float, str] = {}
+            for j, ph in enumerate(phonemes[:-1]):
+                next_of[round(ph.start_time, 4)] = phonemes[j + 1].phoneme
+
             for vf in vowel_features:
                 rows.append({
                     "clip_id": clip_id,
                     "source_label": row_label,
                     "phoneme": vf.phoneme.phoneme,
+                    "next_phoneme": next_of.get(round(vf.phoneme.start_time, 4), ""),
                     "start_s": round(vf.phoneme.start_time, 4),
                     "end_s": round(vf.phoneme.end_time, 4),
                     "F1": round(vf.f1, 1),
@@ -118,7 +131,7 @@ def extract_formants(
 
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", newline="") as f:
-        fieldnames = ["clip_id", "source_label", "phoneme", "start_s", "end_s",
+        fieldnames = ["clip_id", "source_label", "phoneme", "next_phoneme", "start_s", "end_s",
                       "F1", "F2", "F3", "voiced_fraction", "duration_s", "transcript"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -139,6 +152,8 @@ def main() -> int:
     parser.add_argument("--source-label", required=True)
     parser.add_argument("--label-from-manifest", action="store_true",
                         help="Append manifest 'label' field to source_label (e.g. modern_rp_bbc)")
+    parser.add_argument("--target", default="rp", choices=["rp", "genam", "none"],
+                        help="Accent corrections to apply: rp (default) | genam | none")
     args = parser.parse_args()
 
     manifest_path = args.manifest if args.manifest.is_absolute() else PROJECT_ROOT / args.manifest
@@ -150,7 +165,8 @@ def main() -> int:
 
     print(f"Extracting formants: {manifest_path.name} → {out_csv.name}  label={args.source_label}")
     extract_formants(manifest_path, out_csv, args.source_label,
-                     label_from_manifest=args.label_from_manifest)
+                     label_from_manifest=args.label_from_manifest,
+                     target=args.target)
     return 0
 
 

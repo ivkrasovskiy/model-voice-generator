@@ -24,6 +24,7 @@ import pytest
 
 from accent_coach.models import PhonemeInstance
 from accent_coach.pipeline.rp_postprocess import (
+    apply_accent_corrections,
     apply_rp_corrections,
     relabel_bath,
     relabel_lot,
@@ -250,3 +251,48 @@ class TestApplyRpCorrections:
         result = apply_rp_corrections(phs)
         assert result[1].phoneme == "ɒ"   # LOT: "not" ɑː → ɒ
         assert result[3].phoneme == "ɑː"  # BATH: "after" æ → ɑː
+
+
+# ---------------------------------------------------------------------------
+# apply_accent_corrections — target dispatcher (Phase 0.15)
+# ---------------------------------------------------------------------------
+
+class TestApplyAccentCorrections:
+
+    def _car_park(self):
+        # "car park": coda R after vowel before consonant
+        return [
+            _ph("k",  word="car",  start=0.0,  end=0.05),
+            _ph("ɑː", word="car",  start=0.05, end=0.10),
+            _ph("r",  word="car",  start=0.10, end=0.15),
+            _ph("p",  word="park", start=0.15, end=0.20),
+        ]
+
+    def test_rp_strips_coda_r(self):
+        result = apply_accent_corrections(self._car_park(), target="rp")
+        assert "r" not in [p.phoneme for p in result]
+
+    def test_genam_keeps_coda_r(self):
+        # GenAm is rhotic — coda R must survive
+        result = apply_accent_corrections(self._car_park(), target="genam")
+        assert "r" in [p.phoneme for p in result]
+
+    def test_genam_keeps_bath_as_ae(self):
+        # GenAm has no BATH split — "after" stays æ
+        phs = [_ph("æ", arpabet="AE1", word="after", start=0.0, end=0.1)]
+        result = apply_accent_corrections(phs, target="genam")
+        assert result[0].phoneme == "æ"
+
+    def test_rp_relabels_bath(self):
+        phs = [_ph("æ", arpabet="AE1", word="after", start=0.0, end=0.1)]
+        result = apply_accent_corrections(phs, target="rp")
+        assert result[0].phoneme == "ɑː"
+
+    def test_none_is_identity(self):
+        phs = self._car_park()
+        result = apply_accent_corrections(phs, target="none")
+        assert [p.phoneme for p in result] == [p.phoneme for p in phs]
+
+    def test_unknown_target_raises(self):
+        with pytest.raises(ValueError):
+            apply_accent_corrections([], target="scottish")
