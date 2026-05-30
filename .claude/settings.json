@@ -80,7 +80,10 @@
       "Bash(tee /tmp/score_rp_all.log)",
       "Bash(cat >> *)",
       "Bash(cd /Users/ivkrasovskii/model-voice-generator *)",
-      "Bash(yt-dlp --version)"
+      "Bash(yt-dlp --version)",
+      "Bash(python -)",
+      "Bash(sed -i '' 's/ax1.set_xlim\\(xlim\\); ax1.set_ylim\\(ylim\\)/ax1.set_xlim\\(xlim\\)\\\\n    ax1.set_ylim\\(ylim\\)/' scripts/accent_coach_plot_rp_ga.py)",
+      "Bash(sed -i '' 's/ax2.set_xlim\\(xlim\\); ax2.set_ylim\\(ylim\\)/ax2.set_xlim\\(xlim\\)\\\\n    ax2.set_ylim\\(ylim\\)/' scripts/accent_coach_plot_rp_ga.py)"
     ],
     "additionalDirectories": [
       "/private/tmp",
@@ -92,7 +95,8 @@
       "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_14/accent_probe",
       "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_14/lora/bath_base",
       "/Users/ivkrasovskii/model-voice-generator/tests",
-      "/Users/ivkrasovskii/model-voice-generator/tts_output/owner_cal_50"
+      "/Users/ivkrasovskii/model-voice-generator/tts_output/owner_cal_50",
+      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_16/dsp_bc_voice_ga"
     ]
   }
 }
