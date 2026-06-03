@@ -1,9 +1,9 @@
-# Accent Coach — Consolidated Phase History (0.5–0.12)
+# Accent Coach — Consolidated Phase History (0.5–0.16)
 
 This document is the single reference for all retired accent-coach experiment phases.
-Active work is in Phase 0.13. The original per-phase plan and findings files are
-preserved in git history; this document distills each phase down to its goal, inputs,
-command, output, and verdict so the individual files can be deleted.
+Active experiments are in Phase 1 (FastAPI/React UI). The original per-phase plan and
+findings files are preserved in git history; this document distills each phase down to
+its goal, inputs, command, output, and verdict so the individual files can be deleted.
 
 ---
 
@@ -357,3 +357,173 @@ rather than any specific emo configuration. The cleaned overlay became the canon
 reference for Phase 0.11 N=3 confirmation (Phase 0.11's `n3_confirm.py` loads it if
 present). The `speaker_centroids_cleaned.json` artifact is the authoritative centroid
 file for Phase 0.13+.
+
+---
+
+## Phase 0.13 — Formant shift (Lever B) + phoneme-dense emo (Lever A) + F3 norm bench
+
+**Goal**: Close the remaining 13.5-point synth_BC vs modern_rp gap (synth_BC=67.53,
+real_BC=88.9) using two remaining non-training levers. Lever B: WORLD-vocoder formant
+shift on the 5 failing phonemes (/ʌ/, /ʊ/, /ɔː/, /aʊ/, /ɜː/). Lever A:
+phoneme-dense emo clips (Fry/Lindsey clips with high density of failing phonemes) at
+`emo_alpha ∈ {0.3, 0.5, 0.7}`. Phase 0.13c (parallel, independent): test whether F3-based
+normalization tightens the native RP cluster without destroying L2 discrimination.
+
+**Inputs**:
+- `tts_output/accent_coach/cal_25.csv` (25-phrase eval set)
+- `tts_output/accent_coach/cleaned_corpus/speaker_centroids_cleaned.json`
+- Emo candidate clips: `tts_output/accent_coach/phase0_13/emo_dense/cand_{0,1,2}.wav`
+  (lindsey; fry/1_066; fry/1_004)
+
+**Command**:
+```bash
+# Lever B sweep
+.venv/bin/python scripts/accent_coach_phase0_13_lever_b.py
+# Lever A sweep (N=3 reps each cell)
+.venv/bin/python scripts/accent_coach_phase0_13_lever_a.py
+# Phase 0.13c: F3 normalization bench
+.venv/bin/python scripts/accent_coach_phase0_13c_norm_bench.py
+```
+
+**Output**:
+- `tts_output/accent_coach/phase0_13/lever_b/cell_{baseline_b,strut,foot,thought,mouth,nurse,all5}/`
+- `tts_output/accent_coach/phase0_13/lever_a/cell_{cand0,cand1,cand2}/alpha_{0.3,0.5,0.7}/`
+- `accent_coach/dsp/formant_shift.py` — WORLD formant shift DSP
+
+**Verdict**:
+- Lever B: **YELLOW** — cell_all5 lifts composite +5.47 pts (67.53 → 73.00) at cost of
+  −0.37 DNSMOS (WORLD re-synthesis overhead). /ʌ/ responds strongly (+31.6 pts per-phoneme);
+  /aʊ/ collapses (−33.3) — WORLD can't represent formant trajectories. Ceiling is model-bound.
+- Lever A: **RED** — best per-target lift +2.88 pts (below 3-pt YELLOW threshold); that cell
+  simultaneously drops composite by −3.7 pts. Emo vector is a global acoustic modifier, not
+  phoneme-targeted. Higher alpha raises DNSMOS (prosodic expressiveness) but not phoneme accuracy.
+- F3 bench: **RED** — no normalization method (Syrdal-Gopal, Nearey intrinsic, F-ratios) beats
+  bare Bark on both native-tightness and L2-discrimination simultaneously. Bark confirmed as
+  production norm.
+- **Overall**: the 13.5-pt gap is model-bound. Path forward: LoRA fine-tuning.
+
+---
+
+## Phase 0.14 — LoRA fine-tuning of IndexTTS-2 GPT; RP pipeline corrections
+
+**Goal**: Fine-tune IndexTTS-2's GPT (UnifiedVoice) backbone with LoRA on a 1195-clip
+modern-RP corpus (Fry + Lindsey + BBC male, ECAPA-filtered) to improve the 5 failing
+vowels. Simultaneously: fix systematic WhisperX/CMU alignment biases for RP (BATH
+misclassification, rhotic alignment errors, LOT/BATH confusion). Also evaluate the base
+model vs LoRA on 50 cross-eval phrases.
+
+**Inputs**:
+- `tts_output/modern_rp_corpus/{fry,lindsey,bbc}/clips/*.wav` — 1195 training clips
+- Pre-cached mel embeddings in `tts_output/accent_coach/phase0_14/lora/emb_cache/`
+- `tts_output/cross_eval_50/` — 50-phrase cross-eval set
+
+**Command**:
+```bash
+# LoRA training (3 runs; best = Run 3, early-stopped at step_400)
+vendor/index-tts/.venv/bin/python scripts/accent_coach_phase0_14_lora_train.py \
+    --patience 200 --eval-every 100 --max-steps 900
+# Score base vs LoRA on 50 phrases
+.venv/bin/python scripts/score_rp_all.py
+# BATH-targeted score
+.venv/bin/python scripts/score_bath_rp.py
+```
+
+**Output**:
+- `ckpt/best/` — Run 3, step_400, eval_loss 5.726 (best LoRA adapter)
+- `accent_coach/pipeline/rp_postprocess.py` — BATH/LOT relabeling + coda-R stripping
+- `accent_coach/reference/bath_words.py` — BATH and LOT word sets
+- `tests/test_rp_postprocess.py` — 17 unit tests
+
+**Key findings** (50-phrase cross-eval ranking, dist_to_RP Bark):
+| Rank | Source | dist_to_RP |
+|---|---|---|
+| 1 | fry | 0.402 |
+| 2 | **gen_base** | 0.420 |
+| 3 | real_bc | 0.521 |
+| 4 | **gen_lora_best** | 0.567 |
+| 5 | owner | 0.888 |
+
+**Verdict**: **RED (LoRA counterproductive)**. gen_base (0.420) is within 0.018 Bark of
+Fry (0.402) — essentially indistinguishable. The base IndexTTS-2 zero-shot already produces
+near-RP vowels. LoRA at 1195 clips / 400 steps partially unlearns strong zero-shot calibration
+while correcting others; net effect is −0.147 Bark regression. BATH centroids confirm the
+base model is nearly perfect (gen_base F1=510 F2=1233 vs RP target F1=518 F2=1215). LoRA
+direction is abandoned. Pipeline corrections (BATH/LOT/coda-R) are a permanent improvement
+kept in production.
+
+**Downstream**: owner-reported BATH/GOAT as worst vowels (1.230, 1.600 Bark). RP
+measurement pipeline is now coach-grade; Phase 0.15 pivots to coach-grade measurement for
+both RP and GenAm.
+
+---
+
+## Phase 0.15 — Coach-grade measurement + reliability gate (RP ready; GenAm blocked)
+
+**Goal**: Upgrade the measurement stack to coach-grade quality — per-token bootstrap CIs,
+within-category dispersion, Bhattacharyya overlap, F3 rhoticity — and validate that
+the pipeline can reliably distinguish RP from GenAm speakers before shipping any feedback.
+New product decision (from Phase 0.14 analysis): coach is measure-only, no TTS in loop.
+Both RP and GenAm are target accents.
+
+**Inputs**:
+- Existing RP corpus formants (fry, lindsey, bbc, real_bc, gen_base)
+- New GenAm validation corpus: Vsauce/Michael Stevens (76 clips, 801 vowel tokens)
+
+**Command**:
+```bash
+.venv/bin/python scripts/accent_coach_coach_eval.py  # dual-target scorer + gate
+```
+
+**Output**:
+- `accent_coach/diagnostics/coach_metrics.py` — per-token metric (CIs, dispersion, overlap, rhoticity)
+- `scripts/accent_coach_coach_eval.py` — dual-target scorer + gate verdict
+- `tts_output/genam_corpus/formants_genam.csv` — Vsauce GA formants
+- `tts_output/accent_coach/phase0_15/coach_eval.json` — full scored results
+
+**Verdict**: **YELLOW — RP ready, GenAm blocked**. All 5 RP-class sources score
+RP-closer with non-overlapping CIs and read non-rhotic. GenAm source (Vsauce) scores
+RP-closer due to stale Hillenbrand-1995 norms (citation-form, 30 years old) missing
+GOOSE-fronting (F2=997 vs modern 1500) and diphthong convention mismatch. Same defect
+that Phase 0.5 fixed for RP. Owner RP coaching is actionable now (worst: GOAT 2.67,
+THOUGHT 2.11, BATH 2.01 Bark). GenAm fix → Phase 0.16.
+
+---
+
+## Phase 0.16 — Modern GenAm norms (GREEN) + identity/accent disentanglement verdict
+
+**Goal**: (A) Build modern connected-speech GenAm norms from 3 GA male lecture speakers
+(Huberman, Harris, Sapolsky), validate with leave-one-out held-out gate. (B) Determine
+whether IndexTTS-2 can clone GA and whether identity and accent can be separated.
+
+**Inputs**:
+- 266 GA lecture clips from Huberman (dopamine monologue), Harris (AMA), Sapolsky
+  (Stanford lecture) — extracted by `scripts/accent_coach_build_genam.py`
+
+**Command**:
+```bash
+.venv/bin/python scripts/accent_coach_build_genam.py      # build corpus
+.venv/bin/python scripts/accent_coach_build_genam_norms.py  # derive centroids
+.venv/bin/python scripts/accent_coach_genam_loo.py        # LOO GREEN gate
+.venv/bin/python scripts/accent_coach_phase0_16_score_b.py  # Track B: clone + disentangle
+.venv/bin/python scripts/accent_coach_phase0_16_dsp.py    # B2ii: DSP own-voice→RP
+```
+
+**Output**:
+- `accent_coach/reference/genam_norms.py` — `_GENAM_MALE_MODERN` (Hillenbrand kept as legacy)
+- `tts_output/genam_lecture_corpus/` — 266-clip GA corpus + formants
+- `tts_output/accent_coach/phase0_16/` — clone, disentangle, DSP outputs
+
+**Verdict**:
+- Track A: **GREEN** — LOO 3/3: each held-out GA speaker scores GenAm-closer + rhotic.
+  Key fixes vs Hillenbrand: GOOSE F2 997→1301 (fronting captured); PRICE/GOAT switched
+  from onset to steady-state measurement (matches RP convention). Rhoticity broadened
+  beyond NURSE to all pre-/r/ contexts (enough token count now).
+- Track B — disentanglement:
+  - **B1**: GA reference → GenAm-closer + rhotic (1893 Hz) + Huberman identity (0.839). GA cloning works.
+  - **B2i**: spk=BC + emo=Huberman → BC identity (0.763) but RP accent stays (non-rhotic 2345). Emo does NOT carry accent.
+  - **B2ii**: DSP formant-shift on owner voice → identity 0.976 (self), vowels move +0.57 Bark toward RP. DSP separates identity from *vowel*-accent only (not rhoticity or prosody).
+- **Conclusion**: identity and accent are entangled in IndexTTS-2's single speaker reference.
+  "Favourite voice + arbitrary accent" is not achievable from the model alone. DSP gives
+  coaching-grade partial separation (vowels only), sufficient for the F2 feature
+  (own voice, target accent). F1 feature (BC voice in GA) requires an external voice-conversion
+  model if full fidelity (rhoticity + prosody) is needed.
