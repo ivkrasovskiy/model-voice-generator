@@ -14,7 +14,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import random
 import statistics
 import sys
@@ -31,6 +30,8 @@ from accent_coach.pipeline.prosody import (
     extract_syllable_durations_from_words,
 )
 from accent_coach.reference.rp_norms import RP_NPVI_MAX, RP_NPVI_MIN
+from scripts.lib.manifest import load_manifest as _load_manifest_json
+from scripts.lib.manifest import resolve_path as _resolve_path
 
 REPO_ROOT = Path(__file__).parent.parent
 _NPVI_REF = (RP_NPVI_MIN + RP_NPVI_MAX) / 2
@@ -114,20 +115,11 @@ def _minimal_sentence(syllable_durations: list[float]) -> SentenceAnalysis:
 # ---------------------------------------------------------------------------
 
 def load_manifest(path: Path) -> list[dict]:
-    with path.open() as f:
-        return json.load(f)
+    return _load_manifest_json(path)
 
 
 def resolve_path(entry: dict, manifest_path: Path) -> Path | None:
-    raw = entry.get("wav_path") or entry.get("path", "")
-    for candidate in [
-        Path(raw),
-        REPO_ROOT / raw,
-        manifest_path.parent / Path(raw).name,
-    ]:
-        if candidate.exists():
-            return candidate
-    return None
+    return _resolve_path(entry, manifest_path, REPO_ROOT)
 
 
 # ---------------------------------------------------------------------------

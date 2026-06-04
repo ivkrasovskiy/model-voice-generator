@@ -77,7 +77,7 @@ def ecapa_assign_speakers(
     threshold: float = 0.45,
 ) -> list[dict]:
     """Label each word dict with 'speaker' = 'BC' or 'OTHER' via ECAPA windows."""
-    from scripts.lib.identity import embed_wav, load_ecapa
+    from .identity import embed_wav, load_ecapa
 
     ecapa = load_ecapa()
     if ref_wav_path is not None:

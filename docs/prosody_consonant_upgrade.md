@@ -51,78 +51,27 @@ tts_self=100, owner_vs_tts=73.3, native_rp(absolute)=70.0
 
 ---
 
-## Known bugs blocking further work (Phase 0.18 audit)
+## Phase 0.18 bugs — ALL FIXED (Phase 0.19) ✅
 
-Eight bugs were found via code-review agents and documented with failing tests.
-**Fix these before adding intonation or consonant modules** — otherwise the scoring
-pipeline produces silently wrong results for GenAm targets, and the rhythm baseline
-inverts native vs non-native.
+All 8 bugs documented in Phase 0.18 are resolved. 23/23 tests pass.
+Full details in `docs/accent_coach_history.md#phase-019`.
 
-Tests: `tests/accent_coach/test_norms_and_routing.py` and
-`tests/accent_coach/test_score_ordering.py` — 8 of 23 tests currently fail.
-Run with `uv run pytest tests/accent_coach/test_norms_and_routing.py tests/accent_coach/test_score_ordering.py -v`.
+| Bug | Fix | Status |
+|---|---|---|
+| GenAm BATH/LOT override always fires | `accent_target` param in `alignment.py`; gated on `== "rp"` | ✅ |
+| `extract_formants()` never passes `--target` | Added `target` param, threaded to subprocess | ✅ |
+| `compare()` always uses RP norms | Added `accent_target` param, branches `get_genam_norms` | ✅ |
+| `score_vowels()` always uses RP norms | Added `accent_target` param, same fallback branch | ✅ |
+| LOT /ɒ/ centroid was Deterding 1997 stub (600, 900) | Corpus re-measured: **(532, 1114)** n=153 | ✅ |
+| `RP_VOWEL_F1_F2_MALE` alias → LEGACY | Alias → `RP_VOWEL_F1_F2_MALE_MODERN` | ✅ |
+| Rhythm bench used acoustic-only vs hybrid norms | Bench accurate mode now uses WhisperX hybrid | ✅ |
+| `_function_word_analysis()` returns 100.0 when no FW | Returns `(None, [])` → weight redistributed | ✅ |
 
-### Priority 1 — GenAm accent routing (vowel bugs 1, 2, 3, 6)
+**Also deleted**: `extract_syllable_durations()` (legacy G2P-uniform function) — zero callers.
+Replacements: `extract_syllable_durations_from_words()` (hybrid) and
+`extract_syllable_durations_acoustic()` (fast fallback).
 
-GenAm scoring is structurally broken: the aligner applies RP-specific BATH/LOT phoneme
-overrides unconditionally, the formant extractor subprocess always uses `target="rp"`,
-and `compare()` / `score_vowels()` always fall back to `get_rp_norms()`. The net effect
-is that every GenAm speaker is evaluated as if they were an RP speaker — with wrong
-phoneme labels on BATH/LOT words and RP norm distances.
-
-**Fix sequence**:
-1. Add `accent_target: str = "rp"` to `_word_to_phoneme_instances()` in `alignment.py`,
-   thread it through `_whisperx_align()`, `_mms_align()`, `align_audio()`.
-   Gate the BATH override on `accent_target == "rp"`; gate the LOT override identically.
-2. Add `target: str = "rp"` to `pipeline/formants.py::extract_formants()` and pass
-   `"--target", target` in the subprocess call.
-3. Add `accent_target: str = "rp"` to `compare()` in `scoring.py`. Branch:
-   `get_rp_norms(mean_f0)` for `"rp"`, `get_genam_norms(mean_f0)` for `"genam"`.
-4. Same param to `score_vowels()` in `vowels.py` — use `get_genam_norms()` fallback
-   when `accent_target == "genam"` and `reference_norms is None`.
-
-### Priority 2 — Data correctness (vowel bugs 5, 7)
-
-- **LOT /ɒ/ centroid** (`rp_norms.py:24`): still `(600, 900)` — Deterding 1997 stub.
-  The LOT override is live so tokens now reach this centroid. Re-measure:
-  run `accent_coach_extract_formants.py` on `tts_output/modern_rp_corpus/` with the
-  Phase 0.17 LOT override active and replace the stub with the corpus median.
-  Discuss result with owner before committing — the measured value might shift scores.
-
-- **`RP_VOWEL_F1_F2_MALE` alias** (`rp_norms.py:66`): points to `LEGACY` (Deterding 1997).
-  Change to `RP_VOWEL_F1_F2_MALE_MODERN`. Then update the 4 test call-sites in
-  `test_comparison.py` and `test_integration.py` that import this alias — their
-  "perfect score" baselines are currently computed against wrong norms.
-
-### Priority 3 — Rhythm acoustic/hybrid calibration mismatch (rhythm bug 1)
-
-The bench measures native Fry clips with `extract_syllable_durations_acoustic()`, but
-`RP_NPVI_MIN=40`, `RP_NPVI_MAX=62`, and `_DECAY=30` were calibrated from **hybrid**
-measurements (+11 nPVI above acoustic). Acoustic native nPVI ≈ 29–41; with
-`_NPVI_REF=51` and `_DECAY=30`, native at p25 scores 48 — below non-native owner (73.3).
-
-**Do NOT just change thresholds** — discuss with owner first. Two valid fix paths:
-- **Path A (consistent detection)**: wire `extract_syllable_durations_from_words()`
-  (WhisperX hybrid) into the bench for native reference clips. Requires word-level
-  alignment data for the reference clips.
-- **Path B (split norms)**: keep acoustic detection in bench, maintain a separate
-  acoustic-only norm set (`RP_NPVI_MIN_ACOUSTIC ≈ 29`, `RP_NPVI_MAX_ACOUSTIC ≈ 51`).
-  Only use the hybrid-adjusted norms when the hybrid detector was used.
-
-### Priority 4 — Small fixes (rhythm bugs 4, 5)
-
-- **`_function_word_analysis()` returns 100.0 when no FW matched** (`rhythm.py:93`):
-  Change to `return None, []` and treat it identically to the no-phoneme path
-  (redistribute the 0.2 weight to nPVI+pattern).
-
-- **`check_ranking()` has no native-beats-owner assertion** (`rhythm_bench.py:205`):
-  Add a soft assertion that `RP mean score >= owner mean score - 10`, fail with
-  explicit message if violated.
-
-### Priority 5 — Config layer for constants
-
-Move scoring constants out of module-level globals into a shared config file.
-See the constants inventory at the end of this file.
+**Next work**: intonation and consonant module upgrades (Modules 2 and 3 below).
 
 ---
 

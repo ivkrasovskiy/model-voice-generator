@@ -13,7 +13,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import random
 from pathlib import Path
 
@@ -23,6 +22,7 @@ import soundfile as sf
 from accent_coach.comparison.rhythm import score_rhythm
 from accent_coach.models import SentenceAnalysis
 from accent_coach.pipeline.prosody import extract_syllable_durations_acoustic
+from scripts.lib.manifest import load_manifest as _load_manifest_json
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -132,8 +132,7 @@ def run_comparison(use_alignment: bool) -> None:
 
     # TTS self-scores (absolute — no target, shows what "ideal" looks like)
     print("\n── TTS absolute scores (no target — ideal reference) ──\n")
-    with open(REPO_ROOT / "tts_output/rhythm_bench_tts/manifest.json") as _f:
-        tts_manifest = json.load(_f)
+    tts_manifest = _load_manifest_json(REPO_ROOT / "tts_output/rhythm_bench_tts/manifest.json")
     print(f"  {'Sentence':<50} {'nPVI':>6}  {'Score':>6}")
     print("  " + "-" * 66)
     for entry in tts_manifest:
@@ -161,8 +160,7 @@ def _spot_check_corpus(manifest_path: Path, label: str, n: int) -> None:
         print(f"  {label}: manifest not found")
         return
 
-    with open(manifest_path) as _f:
-        entries = json.load(_f)
+    entries = _load_manifest_json(manifest_path)
     sample = random.sample(entries, min(n, len(entries)))
     npvis, scores = [], []
     for e in sample:

@@ -62,14 +62,9 @@ def _embed_wav(wav: np.ndarray, sr: int, ecapa) -> np.ndarray:
     return embed_wav(wav.astype(np.float32), sr, ecapa)
 
 
-def _cosine(a: np.ndarray, b: np.ndarray) -> float:
-    a = a.flatten()
-    b = b.flatten()
-    denom = np.linalg.norm(a) * np.linalg.norm(b)
-    return float(np.dot(a, b) / denom) if denom > 1e-9 else 0.0
-
-
 def audit_speaker(name: str, ref_path: Path, clips_dir: Path, ecapa) -> dict:
+    from scripts.lib.identity import cosine
+
     _log(f"\n=== {name}: ref={ref_path.name}, clips={clips_dir} ===")
     if not ref_path.exists():
         _log(f"  ERROR: reference clip missing: {ref_path}")
@@ -100,7 +95,7 @@ def audit_speaker(name: str, ref_path: Path, clips_dir: Path, ecapa) -> dict:
                                  "dur_s": round(dur, 2), "note": "too short"})
                 continue
             emb = _embed_wav(wav, sr, ecapa)
-            sim = _cosine(emb, ref_emb)
+            sim = cosine(emb, ref_emb)
             per_clip.append({"clip": clip_path.name, "sim": round(sim, 4),
                              "dur_s": round(dur, 2)})
         except Exception as e:

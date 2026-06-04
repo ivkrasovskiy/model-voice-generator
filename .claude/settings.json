@@ -101,7 +101,10 @@
       "Bash(PYTHONPATH=. uv run pytest tests/accent_coach/test_alignment.py -v)",
       "Bash(PYTHONPATH=. uv run python scripts/accent_coach_bench.py --manifest tts_output/accent_coach/bench_rhythm_manifest.csv --run-id rhythm_validate_03)",
       "Bash(rm -v \\\\ *)",
-      "Bash(PYTHONPATH=. uv run python scripts/accent_coach_rhythm_bench.py --fast --n 12)"
+      "Bash(PYTHONPATH=. uv run python scripts/accent_coach_rhythm_bench.py --fast --n 12)",
+      "Bash(cat > *)",
+      "Bash(sed 's/from scripts\\\\.lib\\\\.identity import embed_wav, load_ecapa/from .identity import embed_wav, load_ecapa/' /Users/ivkrasovskii/model-voice-generator/scripts/lib/whisperx_helpers.py)",
+      "Bash(mv /tmp/whisperx_helpers_fixed.py /Users/ivkrasovskii/model-voice-generator/scripts/lib/whisperx_helpers.py)"
     ],
     "additionalDirectories": [
       "/private/tmp",
@@ -114,7 +117,8 @@
       "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_14/lora/bath_base",
       "/Users/ivkrasovskii/model-voice-generator/tests",
       "/Users/ivkrasovskii/model-voice-generator/tts_output/owner_cal_50",
-      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_16/dsp_bc_voice_ga"
+      "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_16/dsp_bc_voice_ga",
+      "/Users/ivkrasovskii/model-voice-generator/scripts/lib"
     ]
   }
 }

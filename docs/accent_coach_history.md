@@ -725,3 +725,88 @@ tests written, constants inventoried. Next session: fix bugs in priority order
 (alignment routing → compare() routing → LOT norm re-measurement → rhythm
 acoustic/hybrid reconciliation → FW=100 → alias → remaining). Do not adjust test
 thresholds to make tests pass; fix the underlying logic.
+
+---
+
+## Phase 0.19 — Fix all Phase 0.18 bugs (23/23 tests green)
+
+**Goal**: Fix all 8 bugs documented by Phase 0.18. Target: `test_norms_and_routing.py`
+and `test_score_ordering.py` both pass in full. No new corpus runs except the LOT
+centroid re-measurement (P5).
+
+**Fixes applied**:
+
+**P1 — GenAm accent routing** (vowel bugs 1, 2, 3, 6 → 4 tests):
+Added `accent_target: str = "rp"` to `_word_to_phoneme_instances()`, `_whisperx_align()`,
+`_mms_align()`, `align_audio()` in `alignment.py`. BATH (AE1→ɑː) and LOT (AA1→ɒ) overrides
+now gated on `accent_target == "rp"` — GenAm passes through to default `AA1→ɑː` mapping.
+Added `accent_target` to `compare()` in `scoring.py` (branches `get_genam_norms` vs
+`get_rp_norms` when `reference_norms=None`), to `score_vowels()` in `vowels.py` (same
+fallback branch), and `target` param to `extract_formants()` in `formants.py` (passed as
+`--target` to subprocess).
+
+**P2 — RP alias** (vowel bug 7 → 1 test):
+`RP_VOWEL_F1_F2_MALE = RP_VOWEL_F1_F2_MALE_MODERN` (was `LEGACY`).
+Any call-site importing the alias now gets Fry+Lindsey+BBC-male norms.
+
+**P3 — FW analysis returns 100.0 when no FW matched** (rhythm bug 5 → 1 test):
+`_function_word_analysis()` now returns `(None, [])` when `matched == 0`.
+Composite weight (0.2) redistributed to nPVI+pattern, same as the no-phoneme path.
+Updated pre-existing `test_rhythm.py::test_content_words_not_flagged` assertion from
+`score == 100.0` to `score is None` (was asserting the buggy behaviour).
+
+**P4 — Rhythm acoustic/hybrid calibration mismatch** (rhythm bug 1 → 1 test):
+Chose Path A (consistent hybrid detection). `get_syllable_durations()` in
+`scripts/accent_coach_rhythm_bench.py` now uses `align_audio()` +
+`extract_syllable_durations_from_words()` in accurate mode (non-fast). Fast mode retains
+acoustic-only and prints an explicit NOTE. Test fixture updated from acoustic p25
+(nPVI≈29, `_alternating_durs(0.20, 0.149)`) to hybrid p25 (nPVI≈40 = RP_NPVI_MIN,
+`_alternating_durs(0.20, 0.133)`). No norm constants changed — the hybrid norms were
+always correct; the bench was using the wrong detector.
+
+**P5 — LOT /ɒ/ centroid** (vowel bug 5 → 1 test):
+Full word-level extraction on 195 LOT-word clips from `modern_rp_corpus` with the Phase
+0.17 LOT override active (aligner now routes LOT words to /ɒ/).
+Sub-manifest: `tts_output/modern_rp_corpus/lot_word_clips_manifest.json`.
+Result: n=153 /ɒ/ tokens; F1 median=532 Hz, F2 median=1114 Hz.
+`RP_VOWEL_F1_F2_MALE_MODERN["ɒ"] = (532, 1114)`.
+Deterding stub (600, 900) retired: modern SSBE /ɒ/ has substantially de-rounded
+(F2 +214 Hz vs Deterding), consistent with ongoing vowel shifts in Southern British English.
+
+**Also deleted**: `extract_syllable_durations()` (legacy G2P-uniform syllable function in
+`prosody.py`) — had zero callers. The two proper replacements remain:
+`extract_syllable_durations_from_words()` (hybrid, accurate) and
+`extract_syllable_durations_acoustic()` (fast fallback).
+
+**Command**:
+```bash
+uv run pytest tests/accent_coach/test_norms_and_routing.py \
+              tests/accent_coach/test_score_ordering.py -v
+uv run pytest tests/ -q
+uv run ruff check scripts/ accent_coach/
+```
+
+**Outcome**: 23/23 pass in the two new files. 149/149 in full suite. Lint clean.
+
+**Bench result** (`--fast` mode, acoustic-only, nPVI ~11 below hybrid — relative ranking only):
+
+| Group | nPVI mean | Score mean |
+|---|---|---|
+| rp_fry | 48.5 | 78.3 |
+| rp_bbc | 35.1 | 60.8 |
+| rp_lindsey | 36.5 | 64.5 |
+| genam_vsauce | 34.8 | 60.3 |
+| genam_harris | 43.4 | 69.6 |
+| genam_huberman | 39.2 | 60.1 |
+| genam_sapolsky | 49.1 | 70.7 |
+| generated_bc | 52.7 | 70.1 |
+| owner | 29.5 | 54.0 |
+
+Generated BC scores higher than native in fast/absolute mode — expected: TTS is
+deliberate speech with nPVI near reference centre (51); podcast/lecture speech is
+faster and more reduced. This is not a scoring bug. Accurate bench mode (hybrid) is
+correctly wired; comparison mode remains authoritative for coaching (user vs same-sentence
+TTS target). Absolute bench is a detector sanity-check only.
+
+**Verdict**: GREEN — all 8 bugs fixed, 23 tests pass, pipeline now correctly routes RP
+and GenAm speakers through separate phoneme labels and norm tables.
