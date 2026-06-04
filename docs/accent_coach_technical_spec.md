@@ -254,10 +254,20 @@ For each English vowel category that appears in the calibration set:
 
 ### Rhythm Score
 
-- Compare syllable duration patterns between user and target on a per-sentence basis.
-- Use Pairwise Variability Index (PVI), a standard rhythm metric.
-- English is stress-timed: high PVI (variable durations). Many L1s are syllable-timed (low PVI).
-- Break down by sentence type: questions, statements, complex sentences each get their own score.
+Three-signal composite (comparison mode): 40% nPVI match + 40% syllable pattern correlation
++ 20% function-word inflation score. Absolute mode (no target): nPVI only.
+
+- **nPVI** — normalised pairwise variability index (Grabe & Low 2002). In comparison mode,
+  scores against the target clip's own nPVI. In absolute mode, scores against corpus-derived
+  RP reference (MIN=40, MAX=62, centre=51 — supersedes lab read-aloud norms from 2002).
+- **Pattern correlation** — Pearson r of mean-normalised syllable duration vectors. Returns
+  neutral 50 when syllable counts diverge > 30% (misaligned positions).
+- **Function word inflation** — for every function word ("the", "a", "to"…), ratio
+  user/target > 1.7 = inflated. Uses WhisperX word-level timestamps directly.
+
+Syllable extraction: `extract_syllable_durations_from_words()` uses word-level timestamps
+from WhisperX for inter-word contrast + per-word acoustic nucleus detection for within-word
+stress contrast. See Phase 0.17 in `docs/accent_coach_history.md` for bug history.
 
 ### Stress Score
 

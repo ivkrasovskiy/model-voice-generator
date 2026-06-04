@@ -13,7 +13,7 @@ from accent_coach.pipeline.formants import extract_vowel_features
 from accent_coach.pipeline.prosody import (
     extract_pitch_contour,
     extract_stress_pattern,
-    extract_syllable_durations,
+    extract_syllable_durations_from_words,
 )
 from accent_coach.pipeline.vot import extract_stop_features
 
@@ -33,7 +33,9 @@ def analyse_audio(
     vowels = extract_vowel_features(audio, sr, phonemes)
     stops = extract_stop_features(audio, sr, phonemes)
     pitch_contour = extract_pitch_contour(audio, sr)
-    syl_durs = extract_syllable_durations(phonemes, len(audio) / sr)
+    # Hybrid: word boundaries from WhisperX alignment (reliable for function words)
+    # + per-word acoustic nucleus detection for within-word stress contrast.
+    syl_durs = extract_syllable_durations_from_words(phonemes, audio, sr)
     stress = extract_stress_pattern(phonemes, audio, sr)
 
     duration_s = librosa.get_duration(y=audio, sr=sr)
@@ -47,4 +49,5 @@ def analyse_audio(
         stress_pattern=stress,
         vowels=vowels,
         stops=stops,
+        phonemes=phonemes,
     )

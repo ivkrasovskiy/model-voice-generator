@@ -21,7 +21,7 @@ RP_VOWEL_F1_F2_MALE_MODERN: dict[str, tuple[float, float]] = {
     "ɛ":  (462, 1571),   # DRESS    — n=1113; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     "æ":  (545, 1496),   # TRAP     — n=718; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     "ɑː": (518, 1215),   # BATH/PALM — n=564; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
-    "ɒ":  (600, 900),    # LOT      — NO DATA in modern_rp corpus; keeping Deterding 1997 approx
+    "ɒ":  (600, 900),    # LOT      — Deterding 1997 approx; corpus remeasure needed once LOT override is live
     "ɔː": (459, 1138),   # THOUGHT  — n=647; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     "ʊ":  (386, 1427),   # FOOT     — n=174; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     "uː": (352, 1506),   # GOOSE    — n=597; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
@@ -117,12 +117,21 @@ RP_VOT_SD_MS: dict[str, float] = {
 
 # ---------------------------------------------------------------------------
 # nPVI (normalised Pairwise Variability Index) range for English
-# Grabe & Low 2002, "Durational Variability in Speech and the Rhythm Class
-# Hypothesis", Papers in Laboratory Phonology 7, pp. 515-546.
-# English nPVI range; syllable-timed languages typically < 45.
+#
+# Corpus-derived from accent_coach modern_rp_corpus (Fry n=120, BBC n=122,
+# Lindsey n=121) + genam_corpus (n=98), measured with hybrid word-alignment
+# detector (extract_syllable_durations_from_words).
+#
+# Acoustic-only measurement: all-native mean=41.0, p25=29.3, p75=50.7
+# Hybrid correction (WhisperX word boundaries vs acoustic-only): +11 nPVI
+# Hybrid-adjusted estimates: mean≈52, p25≈40, p75≈62
+#
+# Supersedes Grabe & Low 2002 (55–75) which was a controlled lab read-aloud
+# task — ~14 nPVI points above natural conversational speech.
+# Syllable-timed languages (Spanish, Japanese) remain ~25–35, clearly below.
 # ---------------------------------------------------------------------------
-RP_NPVI_MIN: float = 55.0   # Grabe & Low 2002
-RP_NPVI_MAX: float = 75.0   # Grabe & Low 2002
+RP_NPVI_MIN: float = 40.0   # corpus p25, hybrid-adjusted (was 55 Grabe & Low 2002)
+RP_NPVI_MAX: float = 62.0   # corpus p75, hybrid-adjusted (was 75 Grabe & Low 2002)
 
 # ---------------------------------------------------------------------------
 # Pitch-contour templates per sentence type (normalised, 50 points, 0–1 range)

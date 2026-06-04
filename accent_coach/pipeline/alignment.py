@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 
 from accent_coach.models import PhonemeInstance
+from accent_coach.reference.bath_words import BATH_WORDS as _BATH_WORDS
+from accent_coach.reference.bath_words import LOT_WORDS as _LOT_WORDS
 
 # ARPABET → IPA mapping (stress-aware for vowels that reduce in unstressed position).
 # Why stress digits matter: CMU dict uses AH0 for schwa and AH1/AH2 for STRUT (/ʌ/).
@@ -40,7 +42,9 @@ ARPABET_TO_IPA: dict[str, str] = {
 }
 
 IPA_VOWELS = frozenset(
-    ["æ", "ɑː", "ɒ", "ɔː", "ʊ", "uː", "ɪ", "iː", "ɛ", "ʌ", "ɜː", "eɪ", "aɪ", "ɔɪ", "aʊ", "əʊ", "ə", "ɐ"]
+    # ɒ reachable via LOT override (AA1 → ɒ for LOT_WORDS)
+    # ɐ removed — genuinely unreachable (not in ARPABET_TO_IPA, no override path)
+    ["æ", "ɑː", "ɒ", "ɔː", "ʊ", "uː", "ɪ", "iː", "ɛ", "ʌ", "ɜː", "eɪ", "aɪ", "ɔɪ", "aʊ", "əʊ", "ə"]
 )
 
 # All ARPABET tokens that are vowels (stress-digit forms + legacy bare forms)
@@ -48,6 +52,22 @@ _ARPABET_VOWEL_BASES = {"AA","AE","AH","AO","AW","AY","EH","ER","EY","IH","IY","
 _ARPABET_VOWELS = frozenset(
     k for k in ARPABET_TO_IPA if re.sub(r"\d","",k) in _ARPABET_VOWEL_BASES
 )
+
+# ---------------------------------------------------------------------------
+# RP phoneme overrides — TRAP/BATH split and LOT/THOUGHT split
+#
+# cmudict follows GenAm phonology.  Two RP-specific remappings needed:
+#
+#   BATH words (Wells 1982 §2.2): cmudict AE1/AE2 → RP /ɑː/
+#     e.g. "bath", "path", "class", "last", "dance", "can't", "after"
+#     (In GenAm these stay /æ/ — override is RP-mode only)
+#
+#   LOT words: cmudict AA1/AA2 → RP /ɒ/ (short open back rounded)
+#     e.g. "lot", "not", "hot", "stop", "box", "clock"
+#     (LOT–THOUGHT merger in GenAm collapses both to /ɑ/; RP keeps them distinct)
+#
+# Source: accent_coach/reference/bath_words.py (Wells 1982 + corpus extensions)
+# ---------------------------------------------------------------------------
 
 # Minimal word-level stress exceptions (secondary syllable is primary stress)
 _STRESS_EXCEPTIONS: dict[str, set[int]] = {
@@ -120,11 +140,22 @@ def _word_to_phoneme_instances(
     if not arpabet_seq:
         return []
 
+    word_key = re.sub(r"[^a-z']", "", word.lower())
+    is_bath = word_key in _BATH_WORDS
+
     syl_indices = _syllable_index(arpabet_seq)
     dur_per_ph = (word_end - word_start) / len(arpabet_seq)
     instances: list[PhonemeInstance] = []
     for i, (arpabet, syl_idx) in enumerate(zip(arpabet_seq, syl_indices, strict=True)):
-        ipa = ARPABET_TO_IPA.get(arpabet, arpabet)
+        # RP phoneme overrides:
+        # TRAP/BATH split — cmudict AE1 maps both; RP BATH words use /ɑː/
+        # LOT/THOUGHT split — cmudict AA1 maps both; RP LOT words use /ɒ/
+        if is_bath and arpabet in ("AE1", "AE2"):
+            ipa = "ɑː"
+        elif word_key in _LOT_WORDS and arpabet in ("AA1", "AA2"):
+            ipa = "ɒ"
+        else:
+            ipa = ARPABET_TO_IPA.get(arpabet, arpabet)
         instances.append(
             PhonemeInstance(
                 phoneme=ipa,

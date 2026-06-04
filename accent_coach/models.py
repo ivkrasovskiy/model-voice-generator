@@ -41,6 +41,7 @@ class SentenceAnalysis(BaseModel):
     stress_pattern: list[bool]
     vowels: list[VowelFeatures]
     stops: list[StopFeatures]
+    phonemes: list[PhonemeInstance] = []
 
 
 class VowelDiagnostic(BaseModel):
@@ -58,6 +59,10 @@ class RhythmBreakdown(BaseModel):
     reference_npvi_min: float
     reference_npvi_max: float
     score: float
+    pattern_correlation: float | None = None
+    inflated_function_words: list[str] = []
+    function_word_score: float | None = None
+    diagnostics: list[str] = []
 
 
 class AspirationBreakdown(BaseModel):

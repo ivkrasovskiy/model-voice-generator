@@ -527,3 +527,93 @@ whether IndexTTS-2 can clone GA and whether identity and accent can be separated
   coaching-grade partial separation (vowels only), sufficient for the F2 feature
   (own voice, target accent). F1 feature (BC voice in GA) requires an external voice-conversion
   model if full fidelity (rhoticity + prosody) is needed.
+
+---
+
+## Phase 0.17 — Rhythm module production-grade upgrade
+
+**Goal**: Make `score_rhythm()` produce coaching-meaningful scores. Pre-work state: nPVI was
+always ~25 for all speakers due to G2P-uniform duration distribution; reference norms from a
+1990s lab read-aloud task; several scoring logic bugs.
+
+**Inputs**:
+- Modern RP corpus (`tts_output/modern_rp_corpus/`) — 363 clips from Fry/BBC/Lindsey
+- GenAm corpus (`tts_output/genam_lecture_corpus/`) — 98 clips
+- Owner calibration set (`tts_output/owner_cal_50/`) — 50 clips, 3 matching our test sentences
+- 8 TTS reference clips (`tts_output/rhythm_bench_tts/`) — generated with IndexTTS-2 num-beams=3
+
+**Files changed**:
+- `accent_coach/pipeline/prosody.py` — new `extract_syllable_durations_from_words()` (hybrid)
+  and `_syllable_durs_within_word()` helper; acoustic 2-peak fallback fixed
+- `accent_coach/pipeline/features.py` — switched from acoustic-only to hybrid function
+- `accent_coach/pipeline/alignment.py` — BATH_WORDS / LOT_WORDS overrides wired in;
+  `ɐ` removed from `IPA_VOWELS` (dead); `ɒ` now reachable via LOT override
+- `accent_coach/comparison/rhythm.py` — pattern correlation 30% count-divergence guard;
+  FW weight redistribution when phoneme data unavailable; diagnostic threshold made relative
+- `accent_coach/reference/rp_norms.py` — `RP_NPVI_MIN` 55→40, `RP_NPVI_MAX` 75→62
+  (corpus-derived, hybrid-adjusted); `_DECAY` in rhythm.py 20→30
+- `tests/accent_coach/test_prosody.py` — new (7 tests)
+- `tests/accent_coach/test_alignment.py` — BATH/LOT split tests added
+- `tests/accent_coach/test_rhythm.py` — Bug 1/2 regression tests added
+
+**Root causes found and fixed**:
+
+1. **G2P-uniform distribution** (CRITICAL): WhisperX gives word-level timestamps; old code
+   split each word uniformly across phonemes → all syllables in a word got identical
+   duration → nPVI ≈ 25 for all speakers regardless of accent.
+   Fix: `extract_syllable_durations_from_words()` uses word-level timestamps directly for
+   single-syllable words (captures the content/function-word contrast) and runs per-word
+   acoustic nucleus detection for multi-syllable words.
+
+2. **Acoustic 2-peak fallback → nPVI=0** (BUG): 2 detected peaks → 1 inter-peak interval →
+   `compute_npvi([x]) = 0.0` → false "rhythm is too even" diagnostic.
+   Fix: unified < 3 peak cases to always use rate-based estimate (≥ 2 elements).
+
+3. **Pattern correlation on misaligned vectors** (BUG): count mismatch truncated both vectors
+   to the shorter length, correlating different phonological positions (e.g. if "the" was
+   missed in one, every subsequent index was off by one).
+   Fix: returns 50.0 (neutral) when `(longer − shorter) / longer > 30%`.
+
+4. **fw_score defaulted to 100 when no phoneme data** (BUG): the 0.2 weight was applied to a
+   fictional perfect score when WhisperX alignment wasn't available or phonemes were empty.
+   Fix: when FW analysis unavailable, composite is 0.5 × nPVI + 0.5 × pattern (no FW term).
+
+5. **Stale nPVI reference norms** (CALIBRATION): Grabe & Low 2002 (lab read-aloud,
+   centre=65) is ~14 nPVI points above measured natural speech from our own corpus.
+   Empirical measurement on 461 native clips (acoustic detector): mean=41, p25=29, p75=51.
+   Hybrid correction +11 (estimated from bench back-calculation) → p25≈40, p75≈62.
+   Updated: `RP_NPVI_MIN=40, RP_NPVI_MAX=62`, `_DECAY=30` (was 20 — too steep for natural
+   speech; native speaker at corpus p25 was scoring 58, now scores ~75).
+
+6. **BATH/LOT phoneme overrides not wired** (BUG): `accent_coach/reference/bath_words.py`
+   had both `BATH_WORDS` and `LOT_WORDS` sets from a prior phase but they were never imported
+   into the aligner. cmudict uses AE1 for both TRAP and BATH (GenAm merger) and AA1 for both
+   PALM and LOT. Result: "class", "last", "dance" were scoring against /æ/ norms (wrong for
+   RP), and "lot", "not", "hot" were scoring against /ɑː/ (PALM) norms instead of /ɒ/.
+   Fix: wired into `_word_to_phoneme_instances()`.
+   Note: BATH override is RP-only (GenAm has no TRAP/BATH split); currently applied
+   unconditionally since all coaching targets are RP.
+
+**Bench results** (`tts_output/accent_coach/bench/rhythm_validate_03/`):
+
+| Experiment | Rhythm (old) | Rhythm (new) | Note |
+|---|---|---|---|
+| tts_self | 100.0 | **100.0** | Sanity: identical clips → perfect |
+| owner_vs_tts | 68.8 | **73.3** | Real coaching gap vs TTS target |
+| native_rp | 61.6 | **70.0** | 3 Fry podcast clips, absolute mode |
+
+8 TTS reference sentences in `tts_output/rhythm_bench_tts/` covering: monosyllabic
+stress-timing, function-word contrast, polysyllabic content, wh-question, yes/no question,
+dense content, function-word-heavy narrative, polysyllabic-only.
+
+**Still broken (out of scope)**:
+- Aspiration: 18.0 for native Fry — scorer calibrated for lab VOT (50–100ms), natural speech
+  doesn't trigger stops at those positions. Needs same corpus-derived recalibration as nPVI.
+- Stress: 25.8 for native Fry — pattern matcher compares against fixed template; natural
+  speech diverges. Same fix path.
+- ɒ (LOT) formant norms: still Deterding 1997 (`(600, 900)`). Needs corpus re-measurement
+  now that LOT tokens are correctly labelled in the aligner.
+
+**Verdict**: **GREEN for rhythm**. Pipeline is self-consistent (tts_self=100), produces a
+meaningful coaching gap (owner 73.3 vs TTS 100), and handles all known measurement bugs.
+Aspiration and stress remain broken in absolute mode; both are known and deferred.
