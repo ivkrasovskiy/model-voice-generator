@@ -110,7 +110,9 @@
       "Read(//Users/ivkrasovskii/.claude/projects/**)",
       "Read(//Users/ivkrasovskii/.claude/**)",
       "Bash(sqlite3 '~/Library/Application Support/rtk/history.db' ' *)",
-      "Bash(sqlite3 ~/Library/\"Application Support\"/rtk/history.db \".schema commands\")"
+      "Bash(sqlite3 ~/Library/\"Application Support\"/rtk/history.db \".schema commands\")",
+      "Bash(git checkout *)",
+      "Bash(git merge *)"
     ],
     "additionalDirectories": [
       "/private/tmp",
