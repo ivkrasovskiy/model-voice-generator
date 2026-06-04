@@ -112,7 +112,15 @@
       "Bash(sqlite3 '~/Library/Application Support/rtk/history.db' ' *)",
       "Bash(sqlite3 ~/Library/\"Application Support\"/rtk/history.db \".schema commands\")",
       "Bash(git checkout *)",
-      "Bash(git merge *)"
+      "Bash(git merge *)",
+      "Bash(wait)",
+      "Bash(PYTHONPATH=. uv run python /tmp/run_conv_bench.py --fast --n 8 --verbose)",
+      "Bash(PYTHONPATH=. uv run python /tmp/run_conv_bench.py --fast --n 15 --seed 99)",
+      "Bash(PYTHONPATH=. uv run python -c ' *)",
+      "Bash(ffprobe -v quiet -show_entries format=duration,format_name -of csv=p=0 /Users/ivkrasovskii/model-voice-generator/tts_output/conversational_refs/rp_conv/clips/mack_20m.wav)",
+      "Bash(PYTHONPATH=. uv run python scripts/bench/accent_coach_conv_bench.py --fast --n 8)",
+      "Bash(PYTHONPATH=. uv run python scripts/bench/accent_coach_rhythm_bench.py --seed 42)",
+      "Bash(PYTHONPATH=. /Users/ivkrasovskii/model-voice-generator/.venv/bin/python -c ' *)"
     ],
     "additionalDirectories": [
       "/private/tmp",

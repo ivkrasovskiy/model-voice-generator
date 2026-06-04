@@ -41,13 +41,18 @@ GROUPS: list[tuple[str, Path, str]] = [
     ("rp_fry",      REPO_ROOT / "tts_output/modern_rp_corpus/fry_manifest.json",       "RP"),
     ("rp_bbc",      REPO_ROOT / "tts_output/modern_rp_corpus/bbc_manifest.json",       "RP"),
     ("rp_lindsey",  REPO_ROOT / "tts_output/modern_rp_corpus/lindsey_manifest.json",   "RP"),
+    ("rp_conv",     REPO_ROOT / "tts_output/conversational_refs/rp_conv/manifest.json", "RP"),
     ("genam_vsauce", REPO_ROOT / "tts_output/genam_corpus/manifest.json",              "GenAm"),
     ("genam_harris",   REPO_ROOT / "tts_output/genam_lecture_corpus/manifest.json",    "GenAm"),
+    ("genam_conv",  REPO_ROOT / "tts_output/conversational_refs/genam_conv/manifest.json", "GenAm"),
+    ("real_bc",     REPO_ROOT / "tts_output/real_bc_corpus/manifest.json",             "Real-BC"),
     ("generated_bc", REPO_ROOT / "tts_output/eval_indextts_interview_short/manifest.json", "Generated"),
     ("owner",        REPO_ROOT / "tts_output/owner_cal_50/manifest.json",              "Owner"),
 ]
 
 _GENAM_LECTURE_SPEAKERS = ["harris", "huberman", "sapolsky"]
+_GENAM_CONV_SPEAKERS = ["carell", "freshair", "jlaw"]
+_RP_CONV_SPEAKERS = ["mack", "mitchell"]
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +301,28 @@ def main() -> None:
         if label == "genam_harris":
             for spk in _GENAM_LECTURE_SPEAKERS:
                 spk_label = f"genam_{spk}"
+                print(f"  Processing {spk_label}...", flush=True)
+                npvis, scores = bench_group(
+                    spk_label, entries, manifest_path, args.n,
+                    args.verbose, args.fast, speaker_filter=spk,
+                )
+                rows.append((spk_label, accent, npvis, scores))
+            continue
+
+        if label == "genam_conv":
+            for spk in _GENAM_CONV_SPEAKERS:
+                spk_label = f"genam_conv_{spk}"
+                print(f"  Processing {spk_label}...", flush=True)
+                npvis, scores = bench_group(
+                    spk_label, entries, manifest_path, args.n,
+                    args.verbose, args.fast, speaker_filter=spk,
+                )
+                rows.append((spk_label, accent, npvis, scores))
+            continue
+
+        if label == "rp_conv":
+            for spk in _RP_CONV_SPEAKERS:
+                spk_label = f"rp_conv_{spk}"
                 print(f"  Processing {spk_label}...", flush=True)
                 npvis, scores = bench_group(
                     spk_label, entries, manifest_path, args.n,

@@ -62,6 +62,7 @@ class RhythmBreakdown(BaseModel):
     pattern_correlation: float | None = None
     inflated_function_words: list[str] = []
     function_word_score: float | None = None
+    outlier_syllables: list[tuple[int, str]] = []
     diagnostics: list[str] = []
 
 

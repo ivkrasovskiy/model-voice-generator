@@ -67,6 +67,34 @@ def _word_mean_durations(phonemes: list[PhonemeInstance]) -> dict[str, float]:
     return {w: float(np.mean(durs)) for w, durs in durations.items() if w}
 
 
+def _per_syllable_outliers(
+    user_durs: list[float],
+    target_durs: list[float],
+    threshold: float = 0.5,
+) -> list[tuple[int, str]]:
+    """Return (position_0based, 'long'|'short') for syllables that deviate > threshold.
+
+    Both duration vectors are normalised by their own mean before comparing, so
+    only the rhythmic shape (not the absolute speaking rate) is considered.
+    Returns at most the 4 worst outliers sorted by magnitude descending.
+    """
+    n = min(len(user_durs), len(target_durs))
+    if n < 3:
+        return []
+    u = np.array(user_durs[:n], dtype=float)
+    t = np.array(target_durs[:n], dtype=float)
+    u_mean, t_mean = u.mean(), t.mean()
+    if u_mean <= 0 or t_mean <= 0:
+        return []
+    diff = u / u_mean - t / t_mean
+    outliers = [
+        (i, "long" if diff[i] > 0 else "short")
+        for i in range(n) if abs(diff[i]) > threshold
+    ]
+    outliers.sort(key=lambda x: abs(diff[x[0]]), reverse=True)
+    return outliers[:4]
+
+
 def _function_word_analysis(
     user_phonemes: list[PhonemeInstance],
     target_phonemes: list[PhonemeInstance],
@@ -146,11 +174,23 @@ def score_rhythm(
     else:
         composite = npvi_score
 
+    # Per-syllable outliers — only when target is available
+    outlier_syllables: list[tuple[int, str]] = []
+    if target is not None:
+        outlier_syllables = _per_syllable_outliers(
+            user.syllable_durations, target.syllable_durations
+        )
+
     diagnostics: list[str] = []
     if user_npvi < ref_npvi - 10:
         diagnostics.append(
             f"Your rhythm is too even (nPVI={user_npvi:.0f} vs target {ref_npvi:.0f}). "
             "Stressed syllables should be much longer than unstressed ones."
+        )
+    elif user_npvi > ref_npvi + 10:
+        diagnostics.append(
+            f"Your speech sounds over-stressed (nPVI={user_npvi:.0f} vs target {ref_npvi:.0f}). "
+            "Try to speak more naturally — each stressed syllable is too exaggerated."
         )
     if inflated:
         words_str = ", ".join(f"'{w}'" for w in inflated[:4])
@@ -163,6 +203,15 @@ def score_rhythm(
             "The overall timing pattern differs from the target. "
             "Listen to which syllables the target rushes through vs. dwells on."
         )
+    if outlier_syllables:
+        long_pos = [str(i + 1) for i, d in outlier_syllables if d == "long"]
+        short_pos = [str(i + 1) for i, d in outlier_syllables if d == "short"]
+        parts = []
+        if long_pos:
+            parts.append(f"syllable(s) {', '.join(long_pos)} are too long")
+        if short_pos:
+            parts.append(f"syllable(s) {', '.join(short_pos)} are too short")
+        diagnostics.append("Timing: " + "; ".join(parts) + " relative to target.")
 
     return RhythmBreakdown(
         npvi=user_npvi,
@@ -172,5 +221,6 @@ def score_rhythm(
         pattern_correlation=pattern_correlation,
         inflated_function_words=inflated,
         function_word_score=function_word_score,
+        outlier_syllables=outlier_syllables,
         diagnostics=diagnostics,
     )

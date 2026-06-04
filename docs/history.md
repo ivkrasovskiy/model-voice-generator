@@ -349,3 +349,7 @@ In the order I'd try them if returning to this project:
   speaker similarity metric
 - [DNSMOS](https://github.com/microsoft/DNS-Challenge) — non-intrusive MOS
 - [uv](https://github.com/astral-sh/uv) — Python package management
+
+---
+
+*Accent coach development (per-phoneme scoring, rhythm diagnostics, RP/GenAm norms) is tracked separately in [accent_coach_history.md](accent_coach_history.md).*

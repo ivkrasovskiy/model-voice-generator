@@ -43,11 +43,20 @@ Fixes the G2P-uniform distribution bug that gave nPVI ≈ 25 for all speakers.
 - `inflated_function_words: list[str]` ✅
 - `pattern_correlation: float | None` ✅
 - `function_word_score: float | None` ✅
+- `outlier_syllables: list[tuple[int, str]]` ✅ (Phase 0.20 — per-position "long"/"short")
 - `diagnostics: list[str]` ✅
 - `sentence_type_scores` — deferred to `analyze_session()` (session-level aggregation)
 
-### Bench result
-tts_self=100, owner_vs_tts=73.3, native_rp(absolute)=70.0
+### Diagnostic signals
+- **Signal 1** (nPVI too flat, `user < ref − 10`): fires for syllable-timed L2 accents (French, Mandarin, Italian)
+- **Signal 2** (function word inflation, ratio > 1.7×): fires for Slavic-type non-reduction
+- **Signal 3** (pattern mismatch, correlation < 60): fires for wrong stress placement
+- **Signal 4** (over-stressing, `user > ref + 10`): fires for lecture/hyper-articulated speech ✅ Phase 0.20
+- **Signal 5** (per-syllable outliers, normalised diff > 0.5): pinpoints which positions are too long/short ✅ Phase 0.20
+
+### Bench result (hybrid mode, Phase 0.20)
+Conversational RP/GenAm: 78–86. TTS: 74.2. Owner: 52.0.
+Full table in `docs/accent_coach_history.md#phase-020`.
 
 ---
 
