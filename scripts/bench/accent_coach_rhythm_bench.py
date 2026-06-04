@@ -33,7 +33,7 @@ from accent_coach.reference.rp_norms import RP_NPVI_MAX, RP_NPVI_MIN
 from scripts.lib.manifest import load_manifest as _load_manifest_json
 from scripts.lib.manifest import resolve_path as _resolve_path
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = Path(__file__).parent.parent.parent
 _NPVI_REF = (RP_NPVI_MIN + RP_NPVI_MAX) / 2
 
 # (group_label, manifest_path, accent_family)

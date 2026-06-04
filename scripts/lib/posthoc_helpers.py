@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
-import soundfile as sf
 
 
 class GenSettings(NamedTuple):
@@ -103,54 +102,6 @@ def compute_ref_centroid(centroid_dir: Path, n_samples: int, ecapa, seed: int) -
     print(f"  centroid norm={np.linalg.norm(centroid):.3f}  "
           f"(single-clip avg norm={np.mean([np.linalg.norm(e) for e in embs]):.3f})")
     return centroid
-
-
-def evaluate_one(
-    label: str,
-    phrases,
-    tts,
-    whisper_model,
-    ecapa,
-    ecapa_ref_emb: np.ndarray,
-    dnsmos_session,
-    out_dir: Path,
-    save_wavs: bool,
-    settings: GenSettings,
-    project_root: Path | None = None,
-):
-    """Generate + score one config. Returns (rows, saved_paths)."""
-    from lib.scoring import score_single_wav
-
-    rows, saved = [], []
-    for slug, prompt in phrases:
-        wav_np, sr = gen_with_retry(tts, prompt, settings)
-        if wav_np is None:
-            print(f"  {label}/{slug}: GENERATION FAILED")
-            rows.append({"slug": slug, "wer": np.nan, "ecapa_sim": np.nan,
-                         "dnsmos_sig": np.nan, "dnsmos_bak": np.nan, "dnsmos_ovr": np.nan,
-                         "transcript": ""})
-            continue
-
-        if save_wavs:
-            wav_path = out_dir / f"{label}_{slug}.wav"
-            sf.write(str(wav_path), wav_np, sr)
-            rel = str(wav_path.relative_to(project_root)) if project_root else str(wav_path)
-            saved.append(rel)
-            print(f"  saved → {wav_path.name}")
-
-        m = score_single_wav(wav_np, sr, prompt, whisper_model, ecapa, dnsmos_session, ecapa_ref_emb)
-        wer, hyp = m["wer"], m["transcript"]
-        ecapa_sim = m["ecapa_sim"]
-        mos = {"sig": m["dnsmos_sig"], "bak": m["dnsmos_bak"], "ovr": m["dnsmos_ovr"]}
-        print(f"  {label}/{slug}: wer={wer:.3f} ecapa={ecapa_sim:.4f} "
-              f"sig={mos['sig']:.2f} bak={mos['bak']:.2f} ovr={mos['ovr']:.2f}")
-        if wer > 0.1:
-            print(f"    (whisper heard: \"{hyp[:80]}\")")
-        rows.append({"slug": slug, "wer": wer, "ecapa_sim": ecapa_sim,
-                     "dnsmos_sig": mos["sig"], "dnsmos_bak": mos["bak"],
-                     "dnsmos_ovr": mos["ovr"], "transcript": hyp})
-
-    return rows, saved
 
 
 def aggregate(rows: list[dict]) -> dict:

@@ -24,7 +24,7 @@ from accent_coach.models import SentenceAnalysis
 from accent_coach.pipeline.prosody import extract_syllable_durations_acoustic
 from scripts.lib.manifest import load_manifest as _load_manifest_json
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = Path(__file__).parent.parent.parent
 
 # Matched pairs: (slug, transcript, owner_path, tts_path)
 MATCHED_PAIRS = [

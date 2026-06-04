@@ -104,7 +104,13 @@
       "Bash(PYTHONPATH=. uv run python scripts/accent_coach_rhythm_bench.py --fast --n 12)",
       "Bash(cat > *)",
       "Bash(sed 's/from scripts\\\\.lib\\\\.identity import embed_wav, load_ecapa/from .identity import embed_wav, load_ecapa/' /Users/ivkrasovskii/model-voice-generator/scripts/lib/whisperx_helpers.py)",
-      "Bash(mv /tmp/whisperx_helpers_fixed.py /Users/ivkrasovskii/model-voice-generator/scripts/lib/whisperx_helpers.py)"
+      "Bash(mv /tmp/whisperx_helpers_fixed.py /Users/ivkrasovskii/model-voice-generator/scripts/lib/whisperx_helpers.py)",
+      "Bash(cd /Users/ivkrasovskii/model-voice-generator && mkdir -p scripts/build scripts/bench scripts/tools)",
+      "Bash(# Check if discover reads pre-hook or post-hook commands *)",
+      "Read(//Users/ivkrasovskii/.claude/projects/**)",
+      "Read(//Users/ivkrasovskii/.claude/**)",
+      "Bash(sqlite3 '~/Library/Application Support/rtk/history.db' ' *)",
+      "Bash(sqlite3 ~/Library/\"Application Support\"/rtk/history.db \".schema commands\")"
     ],
     "additionalDirectories": [
       "/private/tmp",
