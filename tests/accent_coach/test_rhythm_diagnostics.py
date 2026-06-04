@@ -246,6 +246,65 @@ class TestSignal5PerSyllableOutliers:
 
 
 # ---------------------------------------------------------------------------
+# Owner voice profile (real calibration data: hybrid nPVI ≈ 74, score ≈ 52)
+# ---------------------------------------------------------------------------
+#
+# Owner's signature: correct stress placement (alternating pattern matches TTS)
+# but every contrast is over-exaggerated (stressed ≈ 137 ms, unstressed ≈ 63 ms).
+# TTS target has stressed ≈ 125 ms, unstressed ≈ 75 ms (nPVI ≈ 48).
+#
+# Predicted signals:
+#   Signal 4 (over-stress): owner_nPVI (≈72) - target_nPVI (≈48) = 24 >> 10 → FIRES
+#   Signal 1 (too flat):    owner_nPVI > target - 10 → does NOT fire
+#   Signal 3 (pattern):     same alternating shape → high correlation → does NOT fire
+#   Signal 5 (outliers):    per-position diff ≈ 0.07–0.10 < 0.5 threshold → does NOT fire
+#
+OWNER_DURS = [137, 63, 135, 65, 138, 62, 136, 64, 134, 66, 136]
+
+
+class TestOwnerVoiceProfile:
+    def test_owner_fires_only_over_stress_signal(self):
+        target = _sentence(TARGET_DURS)
+        owner = _sentence(OWNER_DURS)
+        result = score_rhythm(owner, target=target)
+
+        # Signal 4 must fire
+        assert any(
+            "over-stress" in d.lower() or "deliberate" in d.lower() or "exaggerat" in d.lower()
+            for d in result.diagnostics
+        ), f"Signal 4 (over-stress) should fire for owner profile, got: {result.diagnostics}"
+
+        # Signal 1 must NOT fire (owner is over-stressed, not flat)
+        assert not any("too even" in d.lower() or "too flat" in d.lower() for d in result.diagnostics), (
+            f"Signal 1 (flat rhythm) should not fire for owner, got: {result.diagnostics}"
+        )
+
+        # Signal 3 must NOT fire (pattern shape matches TTS, just exaggerated)
+        assert not any("pattern" in d.lower() for d in result.diagnostics), (
+            f"Signal 3 (pattern mismatch) should not fire for owner, got: {result.diagnostics}"
+        )
+
+        # Signal 5 must NOT fire (no individual outlier positions, globally uniform exaggeration)
+        assert result.outlier_syllables == [], (
+            f"Signal 5 (per-syllable) should not fire for owner, got: {result.outlier_syllables}"
+        )
+
+    def test_owner_score_is_lower_than_native_conversational(self):
+        # Synthetic data scores ~72 (pattern correlation is artificially high at 99.7
+        # because the fixture is clean alternating; real audio gives ≈52 due to FW
+        # analysis + natural variance). The key invariant is: below native conversational (78–86).
+        target = _sentence(TARGET_DURS)
+        owner = _sentence(OWNER_DURS)
+        result = score_rhythm(owner, target=target)
+        assert result.score < 78, (
+            f"Owner should score below native conversational (78–86), got {result.score:.1f}"
+        )
+        assert result.npvi > 65, (
+            f"Owner nPVI should be > 65 (bench measured ≈74), got {result.npvi:.1f}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # No false positives — native-quality recording
 # ---------------------------------------------------------------------------
 

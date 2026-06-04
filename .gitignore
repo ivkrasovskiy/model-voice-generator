@@ -18,6 +18,7 @@ coqui-ai-TTS/
 .env
 .cache
 .claude/settings.local.json
+.claude/worktrees/
 benedict_voice_finetune/
 __pycache__/
 *.pyc
