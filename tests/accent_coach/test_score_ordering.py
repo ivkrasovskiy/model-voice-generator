@@ -160,11 +160,11 @@ def _alternating_durs(long: float, short: float, n: int = 8) -> list[float]:
 
 
 # Pre-computed via _alternating_durs and the nPVI formula:
-# nPVI([0.25, 0.148]*4) = 100 * 0.102/0.199 = 51.3  (corpus centre)
-# nPVI([0.20, 0.149]*4) = 100 * 0.051/0.1745 = 29.2 (acoustic-only native p25)
+# nPVI([0.25, 0.148]*4) = 100 * 0.102/0.199 = 51.3  (corpus centre = _NPVI_REF)
+# nPVI([0.20, 0.133]*4) = 100 * 0.067/0.1665 = 40.2 (hybrid-detected native p25 = RP_NPVI_MIN)
 # nPVI([0.15]*8) = 0.0  (perfectly syllable-timed)
-_DURS_CENTRE = _alternating_durs(0.25, 0.148)  # nPVI ≈ 51  (hybrid corpus centre)
-_DURS_ACOUSTIC_P25 = _alternating_durs(0.20, 0.149)  # nPVI ≈ 29  (acoustic-only native p25)
+_DURS_CENTRE = _alternating_durs(0.25, 0.148)       # nPVI ≈ 51  (hybrid corpus centre)
+_DURS_HYBRID_P25 = _alternating_durs(0.20, 0.133)   # nPVI ≈ 40  (hybrid native p25 = RP_NPVI_MIN)
 _DURS_SYLLABLE_TIMED = [0.15] * 8  # nPVI = 0  (e.g. Spanish, Japanese)
 _DURS_L2 = [0.175] * 8  # nPVI ≈ 0  (flat, slightly long — typical L2)
 
@@ -211,24 +211,21 @@ def test_corpus_centre_npvi_scores_near_perfect():
 
 
 def test_native_acoustic_p25_npvi_not_penalized_as_l2():
-    """A speaker at acoustic-detection native nPVI p25 (≈29) must score >= 60 in absolute mode.
+    """A speaker at hybrid-detected native nPVI p25 (≈40 = RP_NPVI_MIN) must score >= 60.
 
-    BUG: RP_NPVI_MIN=40 / RP_NPVI_MAX=62 are calibrated for HYBRID detection (+11 above acoustic).
-    When the bench runs native clips with acoustic-only detection, nPVI ≈ 29–41.
-    nPVI=29 → delta=22, score=100*exp(-22/30)=48 — looks like a weak L2 speaker.
-    Fix: either use hybrid detection consistently, or maintain separate acoustic-only norms
-    (RP_NPVI_MIN≈29, RP_NPVI_MAX≈51) for the acoustic-only code path.
+    Hybrid detection is used consistently everywhere (bench + live pipeline).
+    The corpus hybrid p25 is ≈40 which equals RP_NPVI_MIN — a native at the low
+    edge of the reference range must not score like an L2 learner.
     """
     from accent_coach.comparison.rhythm import score_rhythm
 
-    npvi = compute_npvi(_DURS_ACOUSTIC_P25)
-    assert 25 < npvi < 35, f"Fixture nPVI={npvi:.1f} not in acoustic p25 range — check _DURS_ACOUSTIC_P25"
+    npvi = compute_npvi(_DURS_HYBRID_P25)
+    assert 35 < npvi < 45, f"Fixture nPVI={npvi:.1f} not in hybrid p25 range — check _DURS_HYBRID_P25"
 
-    score = score_rhythm(_sentence([], _DURS_ACOUSTIC_P25)).score
+    score = score_rhythm(_sentence([], _DURS_HYBRID_P25)).score
     assert score >= 60, (
-        f"nPVI={npvi:.1f} (acoustic-only native p25) scored {score:.1f}. Expected >= 60. "
-        f"RP_NPVI_MIN={RP_NPVI_MIN} is calibrated for hybrid detection but this is acoustic nPVI. "
-        "Native speakers at acoustic p25 must not score like L2 learners."
+        f"nPVI={npvi:.1f} (hybrid native p25 = RP_NPVI_MIN) scored {score:.1f}. Expected >= 60. "
+        "A native speaker at the minimum of the reference range must not score like L2."
     )
 
 

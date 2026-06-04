@@ -26,7 +26,10 @@ import soundfile as sf
 
 from accent_coach.comparison.rhythm import score_rhythm
 from accent_coach.models import SentenceAnalysis
-from accent_coach.pipeline.prosody import extract_syllable_durations_acoustic
+from accent_coach.pipeline.prosody import (
+    extract_syllable_durations_acoustic,
+    extract_syllable_durations_from_words,
+)
 from accent_coach.reference.rp_norms import RP_NPVI_MAX, RP_NPVI_MIN
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -65,18 +68,30 @@ def load_audio_trimmed(wav_path: Path) -> tuple[np.ndarray, int] | None:
         return None
 
 
-def get_syllable_durations(wav_path: Path, _transcript: str | None, fast: bool) -> list[float] | None:
+def get_syllable_durations(wav_path: Path, transcript: str | None, fast: bool) -> list[float] | None:
     """Extract syllable durations.
 
-    Both modes now use acoustic detection via the canonical
-    extract_syllable_durations_acoustic() from pipeline/prosody.py.
-    The `fast` flag is kept for interface compatibility but the same
-    algorithm is used in both cases.
+    Accurate mode (default): hybrid detection — WhisperX word alignment +
+    per-word acoustic nucleus detection. Matches the live pipeline exactly.
+
+    Fast mode (--fast): acoustic-only bandpass detector, no alignment required.
+    Use for quick relative ranking only; nPVI will be ~11 points lower than hybrid.
     """
     loaded = load_audio_trimmed(wav_path)
     if loaded is None:
         return None
     audio, sr = loaded
+
+    if not fast and transcript:
+        try:
+            from accent_coach.pipeline.alignment import align_audio
+            phonemes = align_audio(wav_path, transcript)
+            durs = extract_syllable_durations_from_words(phonemes, audio, sr)
+            if len(durs) >= 2:
+                return durs
+        except Exception:  # noqa: BLE001
+            pass  # fall through to acoustic
+
     durs = extract_syllable_durations_acoustic(audio, sr)
     return durs if len(durs) >= 2 else None
 

@@ -99,12 +99,12 @@ def test_inflated_function_word_detected():
 
 
 def test_content_words_not_flagged():
-    """Content words are not in FUNCTION_WORDS — even if inflated, no penalty."""
+    """Content words are not in FUNCTION_WORDS — score is None (weight redistributed)."""
     user_ph = _fw_phonemes([("garden", 0.4), ("grows", 0.5)])
     target_ph = _fw_phonemes([("garden", 0.1), ("grows", 0.1)])
     score, inflated = _function_word_analysis(user_ph, target_ph)
     assert inflated == []
-    assert score == pytest.approx(100.0)
+    assert score is None
 
 
 def test_function_words_set_contains_expected():

@@ -21,7 +21,7 @@ RP_VOWEL_F1_F2_MALE_MODERN: dict[str, tuple[float, float]] = {
     "ɛ":  (462, 1571),   # DRESS    — n=1113; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     "æ":  (545, 1496),   # TRAP     — n=718; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     "ɑː": (518, 1215),   # BATH/PALM — n=564; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
-    "ɒ":  (600, 900),    # LOT      — Deterding 1997 approx; corpus remeasure needed once LOT override is live
+    "ɒ":  (532, 1114),   # LOT      — n=153; modern_rp_corpus (lot_word_clips_manifest); measured with LOT override active
     "ɔː": (459, 1138),   # THOUGHT  — n=647; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     "ʊ":  (386, 1427),   # FOOT     — n=174; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
     "uː": (352, 1506),   # GOOSE    — n=597; modern_rp_fry+lindsey+bbc_male; see docs/accent_coach_history.md#phase-07
@@ -62,8 +62,8 @@ RP_VOWEL_F1_F2_MALE_LEGACY: dict[str, tuple[float, float]] = {
     "aʊ": (730, 1100),   # MOUTH onglide — Cruttenden 2014, Table 3.4 approx
 }
 
-# Convenience alias — keep old name pointing at legacy for any call-sites not yet migrated
-RP_VOWEL_F1_F2_MALE = RP_VOWEL_F1_F2_MALE_LEGACY
+# Convenience alias — now points at modern corpus-derived norms (Fry+Lindsey+BBC-male)
+RP_VOWEL_F1_F2_MALE = RP_VOWEL_F1_F2_MALE_MODERN
 
 # ---------------------------------------------------------------------------
 # Vowel formants (Hz) — adult female SSBE

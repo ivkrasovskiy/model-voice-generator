@@ -5,7 +5,7 @@ Context: three comparison modules exist but are thin stubs. This doc lists what 
 
 ---
 
-## Current state (updated Phase 0.17)
+## Current state (updated Phase 0.18 audit)
 
 | Module | File | Status |
 |--------|------|--------|
@@ -48,6 +48,81 @@ Fixes the G2P-uniform distribution bug that gave nPVI ≈ 25 for all speakers.
 
 ### Bench result
 tts_self=100, owner_vs_tts=73.3, native_rp(absolute)=70.0
+
+---
+
+## Known bugs blocking further work (Phase 0.18 audit)
+
+Eight bugs were found via code-review agents and documented with failing tests.
+**Fix these before adding intonation or consonant modules** — otherwise the scoring
+pipeline produces silently wrong results for GenAm targets, and the rhythm baseline
+inverts native vs non-native.
+
+Tests: `tests/accent_coach/test_norms_and_routing.py` and
+`tests/accent_coach/test_score_ordering.py` — 8 of 23 tests currently fail.
+Run with `uv run pytest tests/accent_coach/test_norms_and_routing.py tests/accent_coach/test_score_ordering.py -v`.
+
+### Priority 1 — GenAm accent routing (vowel bugs 1, 2, 3, 6)
+
+GenAm scoring is structurally broken: the aligner applies RP-specific BATH/LOT phoneme
+overrides unconditionally, the formant extractor subprocess always uses `target="rp"`,
+and `compare()` / `score_vowels()` always fall back to `get_rp_norms()`. The net effect
+is that every GenAm speaker is evaluated as if they were an RP speaker — with wrong
+phoneme labels on BATH/LOT words and RP norm distances.
+
+**Fix sequence**:
+1. Add `accent_target: str = "rp"` to `_word_to_phoneme_instances()` in `alignment.py`,
+   thread it through `_whisperx_align()`, `_mms_align()`, `align_audio()`.
+   Gate the BATH override on `accent_target == "rp"`; gate the LOT override identically.
+2. Add `target: str = "rp"` to `pipeline/formants.py::extract_formants()` and pass
+   `"--target", target` in the subprocess call.
+3. Add `accent_target: str = "rp"` to `compare()` in `scoring.py`. Branch:
+   `get_rp_norms(mean_f0)` for `"rp"`, `get_genam_norms(mean_f0)` for `"genam"`.
+4. Same param to `score_vowels()` in `vowels.py` — use `get_genam_norms()` fallback
+   when `accent_target == "genam"` and `reference_norms is None`.
+
+### Priority 2 — Data correctness (vowel bugs 5, 7)
+
+- **LOT /ɒ/ centroid** (`rp_norms.py:24`): still `(600, 900)` — Deterding 1997 stub.
+  The LOT override is live so tokens now reach this centroid. Re-measure:
+  run `accent_coach_extract_formants.py` on `tts_output/modern_rp_corpus/` with the
+  Phase 0.17 LOT override active and replace the stub with the corpus median.
+  Discuss result with owner before committing — the measured value might shift scores.
+
+- **`RP_VOWEL_F1_F2_MALE` alias** (`rp_norms.py:66`): points to `LEGACY` (Deterding 1997).
+  Change to `RP_VOWEL_F1_F2_MALE_MODERN`. Then update the 4 test call-sites in
+  `test_comparison.py` and `test_integration.py` that import this alias — their
+  "perfect score" baselines are currently computed against wrong norms.
+
+### Priority 3 — Rhythm acoustic/hybrid calibration mismatch (rhythm bug 1)
+
+The bench measures native Fry clips with `extract_syllable_durations_acoustic()`, but
+`RP_NPVI_MIN=40`, `RP_NPVI_MAX=62`, and `_DECAY=30` were calibrated from **hybrid**
+measurements (+11 nPVI above acoustic). Acoustic native nPVI ≈ 29–41; with
+`_NPVI_REF=51` and `_DECAY=30`, native at p25 scores 48 — below non-native owner (73.3).
+
+**Do NOT just change thresholds** — discuss with owner first. Two valid fix paths:
+- **Path A (consistent detection)**: wire `extract_syllable_durations_from_words()`
+  (WhisperX hybrid) into the bench for native reference clips. Requires word-level
+  alignment data for the reference clips.
+- **Path B (split norms)**: keep acoustic detection in bench, maintain a separate
+  acoustic-only norm set (`RP_NPVI_MIN_ACOUSTIC ≈ 29`, `RP_NPVI_MAX_ACOUSTIC ≈ 51`).
+  Only use the hybrid-adjusted norms when the hybrid detector was used.
+
+### Priority 4 — Small fixes (rhythm bugs 4, 5)
+
+- **`_function_word_analysis()` returns 100.0 when no FW matched** (`rhythm.py:93`):
+  Change to `return None, []` and treat it identically to the no-phoneme path
+  (redistribute the 0.2 weight to nPVI+pattern).
+
+- **`check_ranking()` has no native-beats-owner assertion** (`rhythm_bench.py:205`):
+  Add a soft assertion that `RP mean score >= owner mean score - 10`, fail with
+  explicit message if violated.
+
+### Priority 5 — Config layer for constants
+
+Move scoring constants out of module-level globals into a shared config file.
+See the constants inventory at the end of this file.
 
 ---
 
@@ -170,3 +245,23 @@ All within what's already used: `numpy`, `scipy`, `librosa`, `praat-parselmouth`
 - GREEN: `uv run pytest tests/ -q` passes, `uv run ruff check scripts/ accent_coach/` clean
 - Each module has at least one unit test with synthetic audio or fixture data
 - `analyze_session()` runs end-to-end on a real sentence without exception
+
+---
+
+## Constants inventory (Phase 0.18 audit — move to config)
+
+All scoring constants are currently module-level globals, making them hard to tune
+without hunting through source. Target: a single `accent_coach/config.py` (or
+`accent_coach/reference/scoring_config.py`) that is the single source of truth.
+
+| Constant | Current location | Value | Meaning |
+|---|---|---|---|
+| `_DECAY` | `comparison/rhythm.py:13` | 30.0 | nPVI score e^{-1} width (nPVI units) |
+| `_NPVI_REF` | `comparison/rhythm.py:12` | 51.0 | nPVI corpus centre (derived from RP_NPVI_MIN/MAX) |
+| `FW_THRESHOLD` | `comparison/rhythm.py:90` | 1.7 | Function-word inflation ratio |
+| `PATTERN_DIVERGENCE_GUARD` | `comparison/rhythm.py:45` | 0.30 | Max count-mismatch fraction before neutralising pattern score |
+| `_SCALE` | `comparison/vowels.py:13` | 1.5 | Vowel distance → score exponential scale |
+| `_WEIGHTS` | `comparison/scoring.py:17` | vowels 25%, others 15% | Per-skill composite weights |
+| `RP_NPVI_MIN/MAX` | `reference/rp_norms.py:133` | 40, 62 | Hybrid-adjusted nPVI native range |
+| `RP_VOT_RANGE_MS` | `reference/rp_norms.py:99` | p,t,k ranges | English VOT reference ranges |
+| `RP_VOT_SD_MS` | `reference/rp_norms.py:112` | 10 ms each | VOT SD (estimated, not corpus-derived) |

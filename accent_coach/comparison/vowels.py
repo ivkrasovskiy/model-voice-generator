@@ -5,6 +5,7 @@ import math
 import numpy as np
 
 from accent_coach.models import SentenceAnalysis, VowelFeatures
+from accent_coach.reference.genam_norms import get_genam_norms
 from accent_coach.reference.normalize import LobanovParams, rp_lobanov_params
 from accent_coach.reference.rp_norms import get_rp_norms
 
@@ -35,6 +36,7 @@ def score_vowels(
     target: SentenceAnalysis | None = None,
     speaker_params: LobanovParams | None = None,
     ref_params: LobanovParams | None = None,
+    accent_target: str = "rp",
 ) -> float:
     """Score vowel accuracy.
 
@@ -66,7 +68,7 @@ def score_vowels(
     norms = reference_norms or {}
     if not norms and user.vowels:
         mean_f0 = float(np.mean([v.pitch_mean for v in user.vowels if v.pitch_mean > 50] or [120]))
-        norms = get_rp_norms(mean_f0)
+        norms = get_genam_norms(mean_f0) if accent_target == "genam" else get_rp_norms(mean_f0)
 
     # Build ref_params from norms if Lobanov mode is requested but ref_params not supplied
     effective_ref_params = ref_params

@@ -70,9 +70,11 @@ def _word_mean_durations(phonemes: list[PhonemeInstance]) -> dict[str, float]:
 def _function_word_analysis(
     user_phonemes: list[PhonemeInstance],
     target_phonemes: list[PhonemeInstance],
-) -> tuple[float, list[str]]:
-    """Returns (score 0-100, list of inflated word strings).
+) -> tuple[float | None, list[str]]:
+    """Returns (score 0-100 or None, list of inflated word strings).
 
+    Returns (None, []) when no function words are matched — caller redistributes
+    the FW weight to nPVI+pattern rather than applying a fictional perfect score.
     Inflated = user duration > 1.7× target duration for that function word.
     """
     user_durs = _word_mean_durations(user_phonemes)
@@ -91,7 +93,7 @@ def _function_word_analysis(
             inflated.append(word)
 
     if matched == 0:
-        return 100.0, []
+        return None, []
     score = 100.0 * (1.0 - len(inflated) / matched)
     return score, inflated
 

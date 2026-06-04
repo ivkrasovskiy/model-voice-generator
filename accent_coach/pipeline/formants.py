@@ -27,6 +27,7 @@ def extract_formants(
     out_csv: Path,
     source_label: str = "synth_BC",
     n_workers: int | None = None,
+    target: str = "rp",
 ) -> Path:
     """Subprocess wrapper around accent_coach_extract_formants.py."""
     manifest = Path(manifest)
@@ -42,7 +43,8 @@ def extract_formants(
         [str(PROJECT_PYTHON), str(PROJECT_ROOT / "scripts/accent_coach_extract_formants.py"),
          "--manifest",      str(manifest),
          "--out",           str(out_csv),
-         "--source-label",  source_label],
+         "--source-label",  source_label,
+         "--target",        target],
         cwd=str(PROJECT_ROOT),
     )
     elapsed = time.time() - t0

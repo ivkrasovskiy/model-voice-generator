@@ -617,3 +617,111 @@ dense content, function-word-heavy narrative, polysyllabic-only.
 **Verdict**: **GREEN for rhythm**. Pipeline is self-consistent (tts_self=100), produces a
 meaningful coaching gap (owner 73.3 vs TTS 100), and handles all known measurement bugs.
 Aspiration and stress remain broken in absolute mode; both are known and deferred.
+
+---
+
+## Phase 0.18 — Bug audit + test infrastructure (no corpus runs)
+
+**Goal**: (A) Clean up obsolete scripts from the `scripts/` directory. (B) Audit rhythm and
+vowel scoring for critical bugs using code review agents. (C) Write failing tests that
+document each bug and serve as acceptance criteria for fixes. (D) Identify hard-coded magic
+constants that need to move to a config layer.
+
+**No corpus runs, no model inference.** Pure code audit and test writing.
+
+**Scripts deleted** (16 one-timers from closed/abandoned phases):
+`phase0_13_lever_{a,b}.py`, `phase0_13_mine_emo.py`, `phase0_13c_f3_bench.py`,
+`phase0_14_{accent_probe,build_dataset,cache_embeddings,lora_train}.py`,
+`phase0_16_{dsp,score_b}.py`, `accent_coach_dsp_shift.py`,
+`diagnose_mps_{grad_explosion,ram}.py`, `diagnose_bad_clips.py`,
+`score_bath_rp.py`, `score_rp_all.py`.
+
+**Bugs found — vowel scoring (7)**:
+
+1. **CRITICAL — BATH/LOT overrides unconditional** (`alignment.py:144–158`):
+   `_word_to_phoneme_instances()` has no `accent_target` parameter; BATH (AE1→ɑː)
+   and LOT (AA1→ɒ) overrides always fire. GenAm speakers get wrong phoneme labels on
+   every BATH/LOT word (~130 Hz F2 error per token). /ɒ/ doesn't exist in GenAm at all.
+
+2. **HIGH — `pipeline/formants.py` subprocess never passes `--target`** (`formants.py:42–46`):
+   Formant extraction wrapper always uses `target="rp"` default — any GenAm corpus
+   extraction through this wrapper silently applies RP relabeling.
+
+3. **HIGH — `compare()` has no accent-target routing** (`scoring.py:39–43`):
+   When `reference_norms=None`, always calls `get_rp_norms()`. GenAm callers have no
+   way to get GenAm norms auto-selected; must pass pre-computed norms externally.
+
+4. **HIGH — Piecewise sigma is RP-only** (`centroids.py:109,122,135`):
+   Comment says "sigma_rp is always derived from {fry,lindsey,bbc_male} regardless of
+   target." GenAm speaker with on-target THOUGHT vowel is penalized because it falls
+   outside the RP σ band.
+
+5. **MEDIUM — LOT /ɒ/ centroid still Deterding 1997 stub** (`rp_norms.py:24`):
+   `RP_VOWEL_F1_F2_MALE_MODERN["ɒ"] = (600, 900)` — the same value as LEGACY.
+   Phase 0.17 wired the LOT override so tokens now reach this centroid; the centroid
+   itself was never updated from the corpus.
+
+6. **MEDIUM — `score_vowels()` missing accent-target param** (`vowels.py:66–69`):
+   Falls back to `get_rp_norms()` when norms are None. No path to GenAm scoring
+   without explicit external norm injection.
+
+7. **LOW — `RP_VOWEL_F1_F2_MALE` alias points to Deterding 1997 legacy** (`rp_norms.py:66`):
+   `RP_VOWEL_F1_F2_MALE = RP_VOWEL_F1_F2_MALE_LEGACY`. Tests importing this alias
+   compute scores against superseded norms. Affects `test_comparison.py` and
+   `test_integration.py`.
+
+**Bugs found — rhythm scoring (5)**:
+
+1. **CRITICAL — Bench uses acoustic-only detection; norms calibrated for hybrid**
+   (`rhythm_bench.py:80`, `rhythm_compare.py:155–156`):
+   `get_syllable_durations()` calls `extract_syllable_durations_acoustic()` for all
+   groups including native Fry clips. The norms (`RP_NPVI_MIN=40, RP_NPVI_MAX=62`,
+   centre=51, `_DECAY=30`) were calibrated from hybrid measurements (+11 above
+   acoustic). Native podcast clips measure acoustic nPVI ≈ 29–41; score =
+   100·exp(−(51−35)/30) ≈ 58 — below non-native owner in comparison mode (73.3).
+   Root cause of the native < owner inversion.
+
+2. **HIGH — `_DECAY` miscalibrated for acoustic-only** (`rhythm.py:13`):
+   Second-order effect of Bug 1; `_DECAY=30` was tuned against hybrid nPVI. Fixed
+   automatically when Bug 1 is resolved (consistent detection mode).
+
+3. **HIGH — Display bug in compare script** (`rhythm_compare.py:127`):
+   "nPVI tgt" column prints `ref_npvi_min + 10`, which accidentally recovers the right
+   value due to the ±10 window construction — fragile if `ref_min` changes.
+
+4. **MEDIUM — `check_ranking()` has no native-beats-owner assertion** (`rhythm_bench.py:205–255`):
+   Bench reports GREEN even when native RP scores below non-native owner.
+
+5. **MEDIUM — `_function_word_analysis()` returns 100.0 when no FW matched** (`rhythm.py:93–94`):
+   Content-word-heavy sentences get 20 free FW points. Fix: return `(None, [])` when
+   `matched == 0` — same treatment as the no-phoneme path.
+
+**Tests written** (`tests/accent_coach/`):
+- `test_norms_and_routing.py` — 14 tests; covers alias bug, LOT stub, GenAm norm content,
+  alignment accent routing, compare() routing. **6 fail now** (bugs 1,2,5,7 + alignment).
+- `test_score_ordering.py` — 9 tests; covers dialect discrimination ordering, rhythm
+  ordering (stress > syllable-timed, native p25 not penalized as L2, FW=100 bug).
+  **2 fail now** (acoustic calibration + FW=100).
+
+**Run to see failures**:
+```bash
+uv run pytest tests/accent_coach/test_norms_and_routing.py \
+              tests/accent_coach/test_score_ordering.py -v
+# Expected now: 15 pass, 8 fail
+# Expected after fixes: 23 pass, 0 fail
+```
+
+**Hard-coded constants identified for config extraction** (separate task):
+- `_DECAY = 30.0` in `comparison/rhythm.py` — nPVI decay constant
+- `_SCALE = 1.5` in `comparison/vowels.py` — Euclidean-to-score scale
+- `1.7` (FW inflation threshold) in `comparison/rhythm.py`
+- `0.30` (pattern correlation divergence guard) in `comparison/rhythm.py`
+- `_WEIGHTS` dict in `comparison/scoring.py` — per-skill composite weights
+- VOT ranges / means / SDs in `reference/rp_norms.py`
+- `RP_NPVI_MIN`, `RP_NPVI_MAX` (already in rp_norms.py — model, not hardcoded)
+
+**Verdict**: **Not a scored phase** — audit + infrastructure only. Eight bugs documented,
+tests written, constants inventoried. Next session: fix bugs in priority order
+(alignment routing → compare() routing → LOT norm re-measurement → rhythm
+acoustic/hybrid reconciliation → FW=100 → alias → remaining). Do not adjust test
+thresholds to make tests pass; fix the underlying logic.

@@ -10,6 +10,7 @@ from accent_coach.comparison.stress import score_stress
 from accent_coach.comparison.vowels import score_vowels
 from accent_coach.diagnostics.advice import build_vowel_diagnostics
 from accent_coach.models import ComparisonResult, SentenceAnalysis
+from accent_coach.reference.genam_norms import get_genam_norms
 from accent_coach.reference.normalize import LobanovParams
 from accent_coach.reference.rp_norms import get_rp_norms
 
@@ -32,15 +33,18 @@ def compare(
     reference_norms: dict[str, tuple[float, float]] | None = None,
     speaker_lobanov: LobanovParams | None = None,
     ref_lobanov: LobanovParams | None = None,
+    accent_target: str = "rp",
 ) -> ComparisonResult:
     """Produce a full ComparisonResult for one sentence."""
 
-    # Infer RP norms for diagnostics if not provided
+    # Infer norms from accent_target when not provided explicitly
     if reference_norms is None:
         mean_f0 = float(
             np.mean([v.pitch_mean for v in user.vowels if v.pitch_mean > 70] or [120.0])
         )
-        reference_norms = get_rp_norms(mean_f0)
+        reference_norms = (
+            get_genam_norms(mean_f0) if accent_target == "genam" else get_rp_norms(mean_f0)
+        )
 
     vowel_score = score_vowels(
         user, reference_norms=reference_norms, target=target,

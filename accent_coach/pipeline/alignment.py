@@ -134,6 +134,7 @@ def _word_to_phoneme_instances(
     word_start: float,
     word_end: float,
     sentence_id: int,
+    accent_target: str = "rp",
 ) -> list[PhonemeInstance]:
     """Convert one word's time span into per-phoneme PhonemeInstance list."""
     arpabet_seq = _g2p(word)
@@ -147,12 +148,11 @@ def _word_to_phoneme_instances(
     dur_per_ph = (word_end - word_start) / len(arpabet_seq)
     instances: list[PhonemeInstance] = []
     for i, (arpabet, syl_idx) in enumerate(zip(arpabet_seq, syl_indices, strict=True)):
-        # RP phoneme overrides:
-        # TRAP/BATH split — cmudict AE1 maps both; RP BATH words use /ɑː/
-        # LOT/THOUGHT split — cmudict AA1 maps both; RP LOT words use /ɒ/
-        if is_bath and arpabet in ("AE1", "AE2"):
+        # RP-specific phoneme overrides — gated on accent_target to avoid
+        # corrupting GenAm scoring (GenAm has no TRAP/BATH split, no /ɒ/).
+        if accent_target == "rp" and is_bath and arpabet in ("AE1", "AE2"):
             ipa = "ɑː"
-        elif word_key in _LOT_WORDS and arpabet in ("AA1", "AA2"):
+        elif accent_target == "rp" and word_key in _LOT_WORDS and arpabet in ("AA1", "AA2"):
             ipa = "ɒ"
         else:
             ipa = ARPABET_TO_IPA.get(arpabet, arpabet)
@@ -171,7 +171,7 @@ def _word_to_phoneme_instances(
 
 
 def _whisperx_align(
-    audio_path: Path, transcript: str, sentence_id: int
+    audio_path: Path, transcript: str, sentence_id: int, accent_target: str = "rp"
 ) -> list[PhonemeInstance]:
     """WhisperX word-level alignment + cmudict G2P → phoneme instances.
 
@@ -195,12 +195,12 @@ def _whisperx_align(
         end = word_seg.get("end")
         if start is None or end is None or end <= start:
             continue
-        instances.extend(_word_to_phoneme_instances(word, start, end, sentence_id))
+        instances.extend(_word_to_phoneme_instances(word, start, end, sentence_id, accent_target))
     return instances
 
 
 def _mms_align(
-    audio_path: Path, transcript: str, sentence_id: int
+    audio_path: Path, transcript: str, sentence_id: int, accent_target: str = "rp"
 ) -> list[PhonemeInstance]:
     """MMS forced alignment fallback. Uses word-level + G2P like WhisperX path."""
     import torch
@@ -249,20 +249,20 @@ def _mms_align(
             continue
         w_start = word_frames[0] / n_frames * duration
         w_end = (word_frames[-1] + 1) / n_frames * duration
-        instances.extend(_word_to_phoneme_instances(word, w_start, w_end, sentence_id))
+        instances.extend(_word_to_phoneme_instances(word, w_start, w_end, sentence_id, accent_target))
     return instances
 
 
 def align_audio(
-    audio_path: Path, transcript: str, sentence_id: int = 0
+    audio_path: Path, transcript: str, sentence_id: int = 0, accent_target: str = "rp"
 ) -> list[PhonemeInstance]:
     try:
-        instances = _whisperx_align(audio_path, transcript, sentence_id)
+        instances = _whisperx_align(audio_path, transcript, sentence_id, accent_target)
         if instances:
             return instances
     except Exception:  # noqa: BLE001 — intentional fallback to MMS
         pass
-    return _mms_align(audio_path, transcript, sentence_id)
+    return _mms_align(audio_path, transcript, sentence_id, accent_target)
 
 
 def filter_vowels(phonemes: list[PhonemeInstance]) -> list[PhonemeInstance]:

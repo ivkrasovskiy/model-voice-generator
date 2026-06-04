@@ -168,38 +168,6 @@ def extract_pitch_contour(audio: np.ndarray, sr: int, n_points: int = 50) -> lis
     return contour.tolist()
 
 
-def extract_syllable_durations(
-    phonemes: list, audio_duration: float
-) -> list[float]:
-    """Collapse phoneme sequence into syllable durations using vowel nuclei.
-
-    Legacy function — kept for external callers.
-    Uses G2P-uniform distribution within words; nPVI from this is underestimated.
-    Prefer extract_syllable_durations_acoustic() for rhythm scoring.
-    """
-    from accent_coach.pipeline.alignment import IPA_VOWELS
-
-    vowel_spans: list[tuple[float, float]] = []
-    for p in phonemes:
-        if p.phoneme in IPA_VOWELS:
-            vowel_spans.append((p.start_time, p.end_time))
-
-    if not vowel_spans:
-        return [audio_duration]
-
-    durations: list[float] = []
-    prev_end = 0.0
-    for i, (_start, end) in enumerate(vowel_spans):
-        syl_end = (
-            (end + vowel_spans[i + 1][0]) / 2
-            if i + 1 < len(vowel_spans)
-            else audio_duration
-        )
-        durations.append(syl_end - prev_end)
-        prev_end = syl_end
-
-    return durations
-
 
 def compute_npvi(syllable_durations: list[float]) -> float:
     """Normalised Pairwise Variability Index.
