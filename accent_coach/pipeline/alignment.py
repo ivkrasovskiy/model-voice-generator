@@ -199,10 +199,83 @@ def _whisperx_align(
     return instances
 
 
+def _char_timestamps_to_phoneme_instances(
+    word: str,
+    char_timestamps: list[tuple[float, float]],
+    sentence_id: int,
+    accent_target: str = "rp",
+) -> list[PhonemeInstance]:
+    """Map MMS character-level timestamps to phoneme instances.
+
+    Uses CMU dict for the phoneme sequence.  Each phoneme i is assigned the
+    time slice [i/n_phones, (i+1)/n_phones] of the character sequence via
+    linear interpolation over actual char boundaries — so phoneme durations
+    reflect real character durations, not uniform word/n_phones splits.
+
+    For n_chars == n_phones the mapping is exact (char boundary == phoneme
+    boundary).  For n_chars != n_phones the interpolation distributes the
+    phonemes proportionally across the character timeline.
+
+    Replaces the uniform-split _word_to_phoneme_instances call in _mms_align.
+    """
+    arpabet_seq = _g2p(word)
+    if not arpabet_seq or not char_timestamps:
+        return []
+
+    word_key = re.sub(r"[^a-z']", "", word.lower())
+    is_bath = word_key in _BATH_WORDS
+    syl_indices = _syllable_index(arpabet_seq)
+    n_phones = len(arpabet_seq)
+    n_chars = len(char_timestamps)
+
+    def _time_at(pos: float) -> float:
+        """Return the audio timestamp at fractional char-sequence position pos."""
+        if pos <= 0.0:
+            return char_timestamps[0][0]
+        if pos >= n_chars:
+            return char_timestamps[-1][1]
+        idx = int(pos)
+        frac = pos - idx
+        if idx >= n_chars:
+            return char_timestamps[-1][1]
+        c_start, c_end = char_timestamps[idx]
+        return c_start + frac * (c_end - c_start)
+
+    instances: list[PhonemeInstance] = []
+    for i, (arpabet, syl_idx) in enumerate(zip(arpabet_seq, syl_indices, strict=True)):
+        start_time = _time_at(i * n_chars / n_phones)
+        end_time = _time_at((i + 1) * n_chars / n_phones)
+
+        if accent_target == "rp" and is_bath and arpabet in ("AE1", "AE2"):
+            ipa = "ɑː"
+        elif accent_target == "rp" and word_key in _LOT_WORDS and arpabet in ("AA1", "AA2"):
+            ipa = "ɒ"
+        else:
+            ipa = ARPABET_TO_IPA.get(arpabet, arpabet)
+
+        instances.append(
+            PhonemeInstance(
+                phoneme=ipa,
+                arpabet=arpabet,
+                start_time=start_time,
+                end_time=end_time,
+                sentence_id=sentence_id,
+                word=word,
+                is_stressed=_is_word_stressed(word, syl_idx),
+            )
+        )
+    return instances
+
+
 def _mms_align(
     audio_path: Path, transcript: str, sentence_id: int, accent_target: str = "rp"
 ) -> list[PhonemeInstance]:
-    """MMS forced alignment fallback. Uses word-level + G2P like WhisperX path."""
+    """MMS forced alignment. Uses char-level timestamps for phoneme boundaries.
+
+    torchaudio.functional.forced_align gives per-character acoustic boundaries.
+    These are passed to _char_timestamps_to_phoneme_instances so phoneme start
+    times reflect actual character durations rather than uniform word/n_phones splits.
+    """
     import torch
     import torchaudio
 
@@ -217,7 +290,6 @@ def _mms_align(
 
     labels = bundle.get_labels()
     words = transcript.split()
-    # Build char-level token sequence (MMS_FA is char-level)
     char_tokens: list[str] = []
     word_boundaries: list[tuple[int, int, str]] = []  # (token_start, token_end, word)
     for word in words:
@@ -231,25 +303,31 @@ def _mms_align(
     if not char_tokens:
         return []
 
-    targets = torch.tensor([[labels.index(c) for c in char_tokens]])  # [1, N]
+    targets = torch.tensor([[labels.index(c) for c in char_tokens]])
     with torch.inference_mode():
         alignment, _ = torchaudio.functional.forced_align(emission, targets)
 
-    # alignment shape: [1, time] — frame index of active token
     frame_tokens = alignment[0].tolist()
     duration = waveform.shape[-1] / bundle.sample_rate
     n_frames = len(frame_tokens)
 
-    # Map frame ranges back to words, then use G2P for phonemes
     instances: list[PhonemeInstance] = []
     for t_start, t_end, word in word_boundaries:
-        # Find frames belonging to this word's token range
-        word_frames = [f for f, tok in enumerate(frame_tokens) if t_start <= tok < t_end]
-        if not word_frames:
+        # Extract per-character timestamps for this word from the frame alignment
+        char_ts: list[tuple[float, float]] = []
+        for char_idx in range(t_start, t_end):
+            frames = [f for f, tok in enumerate(frame_tokens) if tok == char_idx]
+            if not frames:
+                continue
+            char_ts.append((
+                frames[0] / n_frames * duration,
+                (frames[-1] + 1) / n_frames * duration,
+            ))
+        if not char_ts:
             continue
-        w_start = word_frames[0] / n_frames * duration
-        w_end = (word_frames[-1] + 1) / n_frames * duration
-        instances.extend(_word_to_phoneme_instances(word, w_start, w_end, sentence_id, accent_target))
+        instances.extend(
+            _char_timestamps_to_phoneme_instances(word, char_ts, sentence_id, accent_target)
+        )
     return instances
 
 

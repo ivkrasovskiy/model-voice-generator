@@ -7,8 +7,8 @@ from accent_coach.models import PhonemeInstance, StopFeatures
 from accent_coach.pipeline.alignment import filter_stops
 
 _PRE_MS = 20.0
-_POST_MS = 80.0
-_BURST_SEARCH_MS = 40.0
+_POST_MS = 200.0    # extended: voicing onset can be 150+ ms after burst when G2P timestamps are off
+_BURST_SEARCH_MS = 100.0  # extended: G2P uniform-split timestamps can be 40-80 ms off from actual burst
 _HF_LO = 2000
 _HF_HI = 7500  # Why: must stay < nyquist (8000 Hz at SR=16kHz) to avoid scipy boundary error
 _HOP_MS = 5.0

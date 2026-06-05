@@ -120,7 +120,16 @@
       "Bash(ffprobe -v quiet -show_entries format=duration,format_name -of csv=p=0 /Users/ivkrasovskii/model-voice-generator/tts_output/conversational_refs/rp_conv/clips/mack_20m.wav)",
       "Bash(PYTHONPATH=. uv run python scripts/bench/accent_coach_conv_bench.py --fast --n 8)",
       "Bash(PYTHONPATH=. uv run python scripts/bench/accent_coach_rhythm_bench.py --seed 42)",
-      "Bash(PYTHONPATH=. /Users/ivkrasovskii/model-voice-generator/.venv/bin/python -c ' *)"
+      "Bash(PYTHONPATH=. /Users/ivkrasovskii/model-voice-generator/.venv/bin/python -c ' *)",
+      "Bash(mkdir -p /Users/ivkrasovskii/model-voice-generator/accent_coach/comparison/consonants)",
+      "Bash(cp /Users/ivkrasovskii/model-voice-generator/accent_coach/comparison/consonants.py /tmp/consonants_old.py)",
+      "Bash(rm /Users/ivkrasovskii/model-voice-generator/accent_coach/comparison/consonants.py)",
+      "Bash(rm /Users/ivkrasovskii/model-voice-generator/scripts/bench_consonants.py && rtk ls /Users/ivkrasovskii/model-voice-generator/scripts/lib/)",
+      "mcp__codegraph__codegraph_explore",
+      "Bash(PYTHONPATH=. uv run python scripts/bench/accent_coach_consonant_bench.py --n 10 --accent rp)",
+      "Bash(python3 scripts/bench/accent_coach_consonant_bench.py --n 3 --group rp_fry,owner,genam_harris)",
+      "Bash(python3 scripts/bench/accent_coach_consonant_bench.py --n 15 --group rp_fry,owner)",
+      "Bash(python3 scripts/bench/accent_coach_consonant_bench.py --n 15 --accent genam --group genam_harris)"
     ],
     "additionalDirectories": [
       "/private/tmp",

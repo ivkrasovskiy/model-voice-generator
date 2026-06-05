@@ -30,6 +30,13 @@ _FRICATIVES: frozenset[str] = frozenset(RP_FRICATIVE_COG_HZ)
 # /HH/ (aspiration) skipped — not a true fricative CoG signal (spec 3A)
 _SKIP = frozenset({"h", "hh"})
 
+# High-pass cutoff for CoG: removes voicing fundamental, F1, and F2 contamination
+# that bleeds in from adjacent vowels (especially with inaccurate G2P timestamps).
+# Jongman 2000 measured in clean lab conditions; conversational speech has ~500-1000 Hz
+# lower raw CoG due to low-frequency energy pollution. Zeroing sub-2kHz bins brings
+# measurements back in range of the published citation-form references.
+_COG_HP_HZ: float = 2000.0
+
 
 def _spectral_centroid(audio: np.ndarray, sr: int, p: PhonemeInstance) -> float | None:
     """Spectral centre of gravity (CoG) for phoneme segment using power spectrum."""
@@ -40,6 +47,7 @@ def _spectral_centroid(audio: np.ndarray, sr: int, p: PhonemeInstance) -> float 
     segment = audio[start:end].astype(np.float64)
     spectrum = np.abs(np.fft.rfft(segment))
     freqs = np.fft.rfftfreq(len(segment), d=1.0 / sr)
+    spectrum = spectrum * (freqs >= _COG_HP_HZ)
     total = spectrum.sum()
     if total < 1e-12:
         return None

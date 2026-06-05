@@ -25,6 +25,7 @@ import numpy as np
 import parselmouth
 
 from accent_coach.models import PhonemeInstance, SentenceAnalysis
+from accent_coach.pipeline.alignment import IPA_VOWELS
 from accent_coach.reference.genam_norms import (
     GA_LATERAL_CLEAR_F2_THRESHOLD_HZ,
     GA_LATERAL_DARK_F2_TARGET_HZ,
@@ -195,10 +196,28 @@ def score_liquids(
         for w, ps in word_groups.items()
     }
 
+    # Build a next-phoneme lookup (by start_time) for pre-vocalic /r/ gate.
+    # Key on start_time float (not id()) so Pydantic object copies don't break lookup.
+    sorted_all = sorted(user.phonemes, key=lambda x: x.start_time)
+    next_ph_by_time: dict[float, str | None] = {}
+    for i, ph_inst in enumerate(sorted_all):
+        next_ph_by_time[ph_inst.start_time] = (
+            sorted_all[i + 1].phoneme if i + 1 < len(sorted_all) else None
+        )
+
     for p in user.phonemes:
         ph = p.phoneme
 
         if ph == "r":
+            # RP is non-rhotic: /r/ at post-vocalic coda positions (e.g. "over",
+            # "bird") is not pronounced. G2P always emits an /r/ phoneme there,
+            # so scoring that position penalises RP natives unfairly. Gate to
+            # pre-vocalic tokens only (next phoneme is a vowel) for RP.
+            # Linking /r/ (word-final /r/ before vowel-initial next word) IS
+            # pronounced in RP and is correctly included — the check is purely
+            # on whether the next phoneme globally is a vowel.
+            if accent_target == "rp" and next_ph_by_time.get(p.start_time) not in IPA_VOWELS:
+                continue
             score = score_rhotic(audio, sr, p, accent_target=accent_target)
             rhotic_scores.append(score)
             # Flag if F3 measured above non-native threshold

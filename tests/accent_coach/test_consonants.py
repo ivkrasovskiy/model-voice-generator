@@ -481,3 +481,95 @@ def test_no_consonants_returns_neutral_score():
     assert 50 <= result.score <= 80, (
         f"score={result.score:.1f} out of neutral range [50, 80] for empty consonant set."
     )
+
+
+# ---------------------------------------------------------------------------
+# Section 7 — RP non-rhotic position gate
+# /r/ in RP is only pronounced in pre-vocalic position (before a vowel).
+# Post-vocalic /r/ (e.g. "bird" before consonant) is not produced → skip.
+# Linking /r/ (word-final /r/ before vowel-initial next word) IS produced → score.
+# GenAm is fully rhotic: all positions scored regardless.
+# ---------------------------------------------------------------------------
+
+
+def test_rp_prevocalic_r_is_scored():
+    """RP /r/ immediately before a vowel phoneme must be scored.
+
+    Pre-vocalic /r/ is produced in all English varieties including RP.
+    rhotic_score must not be None when the only /r/ token is before a vowel.
+    """
+    from accent_coach.comparison.consonants import score_consonants
+
+    seg = _resonator_audio([(500, 80), (1200, 120), (1950, 150), (3400, 200)])
+    audio = _place_in_silence(seg, 0.02)
+    # /r/ (0.02–0.17) followed by vowel /eɪ/ (0.17–0.32) — e.g. the /r/ in "rain"
+    ph_r = _ph("r",  "R",   start=0.02, end=0.17, word="rain")
+    ph_v = _ph("eɪ", "EY1", start=0.17, end=0.32, word="rain")
+    result = score_consonants(_sentence([ph_r, ph_v]), audio, SR, accent_target="rp")
+    assert result.rhotic_score is not None, (
+        "RP pre-vocalic /r/ (before vowel, e.g. 'rain') must be scored. "
+        "rhotic_score is None — pre-vocalic gate is over-filtering."
+    )
+
+
+def test_rp_postvocalic_r_before_consonant_is_skipped():
+    """RP /r/ before a consonant (e.g. 'bird') must NOT be scored — RP is non-rhotic.
+
+    G2P (CMU dict) always emits an /r/ phoneme for words like 'bird' (B IH1 R D).
+    RP speakers do not produce that /r/; scoring it penalises RP natives unfairly.
+    When the only /r/ token is followed by a consonant, rhotic_score must be None
+    (weight redistributed to other sub-classes, not a fictional penalty).
+    """
+    from accent_coach.comparison.consonants import score_consonants
+
+    seg = _resonator_audio([(500, 80), (1200, 120), (2700, 150), (3800, 200)])
+    audio = _place_in_silence(seg, 0.02)
+    # /r/ (0.02–0.17) followed by /d/ (0.17–0.32) — the /r/ in "bird" before 'd'
+    ph_r = _ph("r", "R", start=0.02, end=0.17, word="bird")
+    ph_d = _ph("d", "D", start=0.17, end=0.32, word="bird")
+    result = score_consonants(_sentence([ph_r, ph_d]), audio, SR, accent_target="rp")
+    assert result.rhotic_score is None, (
+        f"RP post-vocalic /r/ before consonant must be skipped; rhotic_score={result.rhotic_score}. "
+        "RP is non-rhotic — this /r/ is not produced, so no F3 depression is expected."
+    )
+
+
+def test_rp_linking_r_is_scored():
+    """RP linking /r/ (word-final /r/ before vowel-initial next word) must be scored.
+
+    In RP, 'there and', 'car is', 'here are' produce a linking /r/.
+    The next phoneme globally is a vowel (from the following word), so the gate
+    must allow it through — same rule as pre-vocalic, just across a word boundary.
+    """
+    from accent_coach.comparison.consonants import score_consonants
+
+    seg = _resonator_audio([(500, 80), (1200, 120), (1950, 150), (3400, 200)])
+    audio = _place_in_silence(seg, 0.02)
+    # "there and": /r/ at end of "there", followed by /æ/ (first phoneme of "and")
+    ph_r = _ph("r",  "R",   start=0.02, end=0.17, word="there")
+    ph_v = _ph("æ",  "AE1", start=0.17, end=0.32, word="and")
+    result = score_consonants(_sentence([ph_r, ph_v]), audio, SR, accent_target="rp")
+    assert result.rhotic_score is not None, (
+        "RP linking /r/ (word-final /r/ before vowel-initial next word, e.g. 'there and') "
+        "must be scored. rhotic_score is None — the gate is incorrectly filtering linking /r/."
+    )
+
+
+def test_genam_r_before_consonant_is_scored():
+    """GenAm /r/ before a consonant must be scored — GA is fully rhotic.
+
+    GA speakers produce /r/ in all positions. The RP non-rhotic gate must NOT
+    apply when accent_target='genam'. rhotic_score must not be None.
+    """
+    from accent_coach.comparison.consonants import score_consonants
+
+    seg = _resonator_audio([(500, 80), (1200, 120), (1950, 150), (3400, 200)])
+    audio = _place_in_silence(seg, 0.02)
+    # Same token as the RP-skip test but in GenAm mode — must score
+    ph_r = _ph("r", "R", start=0.02, end=0.17, word="bird")
+    ph_d = _ph("d", "D", start=0.17, end=0.32, word="bird")
+    result = score_consonants(_sentence([ph_r, ph_d]), audio, SR, accent_target="genam")
+    assert result.rhotic_score is not None, (
+        "GenAm /r/ before a consonant must be scored (GA is fully rhotic). "
+        f"rhotic_score={result.rhotic_score}. The RP non-rhotic gate must not apply to GenAm."
+    )
