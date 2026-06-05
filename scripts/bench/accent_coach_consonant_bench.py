@@ -1,0 +1,244 @@
+"""Consonant quality bench — per-speaker-group scores.
+
+Validates that the consonant module separates speaker groups in the expected direction:
+  native RP (Fry, Lindsey) ≈ native GA > TTS BC ≥ real BC > owner
+
+Runs WhisperX forced alignment + G2P phoneme extraction for each clip then
+calls score_consonants() with the resulting features.
+
+Usage:
+    uv run python scripts/bench/accent_coach_consonant_bench.py          # all groups
+    uv run python scripts/bench/accent_coach_consonant_bench.py --n 8    # 8 clips/group
+    uv run python scripts/bench/accent_coach_consonant_bench.py --accent genam
+    uv run python scripts/bench/accent_coach_consonant_bench.py --group rp_fry,owner
+"""
+from __future__ import annotations
+
+import argparse
+import random
+import sys
+from pathlib import Path
+
+import numpy as np
+import soundfile as sf
+
+REPO_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from accent_coach.comparison.consonants import score_consonants
+from accent_coach.models import SentenceAnalysis
+from accent_coach.pipeline.alignment import align_audio
+from accent_coach.pipeline.vot import extract_stop_features
+from scripts.lib.manifest import load_manifest, resolve_path
+
+GROUPS: list[tuple[str, Path, str]] = [
+    ("rp_fry",      REPO_ROOT / "tts_output/modern_rp_corpus/fry_manifest.json",              "RP"),
+    ("rp_lindsey",  REPO_ROOT / "tts_output/modern_rp_corpus/lindsey_manifest.json",          "RP"),
+    ("real_bc",     REPO_ROOT / "tts_output/real_bc_corpus/manifest.json",                    "Real-BC"),
+    ("tts_bc",      REPO_ROOT / "tts_output/eval_indextts_interview_short/manifest.json",      "TTS"),
+    ("owner",       REPO_ROOT / "tts_output/owner_cal_50/manifest.json",                      "Owner"),
+    ("genam_harris",   REPO_ROOT / "tts_output/genam_lecture_corpus/manifest.json",           "GenAm"),
+]
+
+# Sub-score column widths
+_COLS = ("composite", "fricative", "stop_vot", "rhotic", "lateral")
+
+
+def _load_audio_16k(wav: Path) -> tuple[np.ndarray, int] | None:
+    try:
+        audio, sr = sf.read(str(wav), always_2d=False)
+        if audio.ndim == 2:
+            audio = audio.mean(axis=1)
+        audio = audio.astype(np.float32)
+        if sr != 16_000:
+            import librosa
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=16_000)
+            sr = 16_000
+        return audio, sr
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _score_clip(
+    wav: Path,
+    transcript: str,
+    sentence_id: int,
+    accent_target: str,
+) -> dict | None:
+    loaded = _load_audio_16k(wav)
+    if loaded is None:
+        return None
+    audio, sr = loaded
+    if len(audio) < sr * 0.8:
+        return None
+
+    try:
+        phonemes = align_audio(wav, transcript, sentence_id, accent_target)
+    except Exception as e:  # noqa: BLE001
+        print(f"    [align err] {wav.name}: {e}", file=sys.stderr)
+        return None
+
+    if not phonemes:
+        return None
+
+    try:
+        stops = extract_stop_features(audio, sr, phonemes)
+    except Exception:  # noqa: BLE001
+        stops = []
+
+    sa = SentenceAnalysis(
+        sentence_id=sentence_id,
+        sentence_type="statement",
+        duration_s=len(audio) / sr,
+        syllable_durations=[0.2],
+        pitch_contour=[0.5] * 50,
+        stress_pattern=[True],
+        vowels=[],
+        stops=stops,
+        phonemes=phonemes,
+    )
+    try:
+        cs = score_consonants(sa, audio, sr, accent_target=accent_target)
+    except Exception as e:  # noqa: BLE001
+        print(f"    [score err] {wav.name}: {e}", file=sys.stderr)
+        return None
+
+    n_fric = sum(1 for p in phonemes if p.phoneme in {"s","z","ʃ","ʒ","θ","ð","f","v"})
+    n_rh   = sum(1 for p in phonemes if p.phoneme == "r")
+    n_lat  = sum(1 for p in phonemes if p.phoneme == "l")
+    return {
+        "composite": cs.score,
+        "fricative":  cs.fricative_score,
+        "stop_vot":   cs.stop_aspiration_score,
+        "rhotic":     cs.rhotic_score,
+        "lateral":    cs.lateral_score,
+        "n_phonemes": len(phonemes),
+        "n_stops":    len(stops),
+        "n_fric": n_fric, "n_rh": n_rh, "n_lat": n_lat,
+    }
+
+
+def bench_group(
+    label: str,
+    entries: list[dict],
+    manifest_path: Path,
+    n: int,
+    verbose: bool,
+    accent_target: str,
+    speaker_filter: str | None = None,
+) -> dict:
+    if speaker_filter:
+        entries = [e for e in entries if e.get("speaker") == speaker_filter]
+
+    # Prefer longer clips (more phoneme tokens = more reliable scores)
+    def dur(e: dict) -> float:
+        s, end = e.get("start_s", 0), e.get("end_s")
+        return (end - s) if end else 3.0
+    entries = sorted(entries, key=dur, reverse=True)
+
+    sample = random.sample(entries[:max(n * 3, 30)], min(n, len(entries)))
+
+    results: list[dict] = []
+    for i, entry in enumerate(sample):
+        wav = resolve_path(entry, manifest_path, REPO_ROOT)
+        if wav is None:
+            continue
+        transcript = entry.get("transcript") or entry.get("prompt", "")
+        if not transcript:
+            continue
+        r = _score_clip(wav, transcript, i, accent_target)
+        if r is None:
+            continue
+        results.append(r)
+        if verbose:
+            fric  = f"{r['fricative']:5.1f}" if r["fricative"]  is not None else "  n/a"
+            vot   = f"{r['stop_vot']:5.1f}"  if r["stop_vot"]   is not None else "  n/a"
+            rh    = f"{r['rhotic']:5.1f}"    if r["rhotic"]     is not None else "  n/a"
+            lat   = f"{r['lateral']:5.1f}"   if r["lateral"]    is not None else "  n/a"
+            print(
+                f"  {wav.name:<38} comp={r['composite']:5.1f} "
+                f"fric={fric} vot={vot} rh={rh} lat={lat} "
+                f"(ph={r['n_phonemes']} fr={r['n_fric']} rh={r['n_rh']} l={r['n_lat']})"
+            )
+
+    if not results:
+        return {}
+
+    agg: dict[str, float] = {"n": float(len(results))}
+    for key in _COLS:
+        vals = [r[key] for r in results if r.get(key) is not None]
+        agg[key] = float(np.mean(vals)) if vals else float("nan")
+    return agg
+
+
+def _fmt(v: float) -> str:
+    return f"{v:7.1f}" if not np.isnan(v) else "    n/a"
+
+
+def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("--n", type=int, default=12, help="clips per group (default 12)")
+    p.add_argument("--accent", choices=["rp", "genam"], default="rp")
+    p.add_argument("--group", default=None, help="comma-separated group labels to run")
+    p.add_argument("--verbose", "-v", action="store_true")
+    p.add_argument("--seed", type=int, default=42)
+    args = p.parse_args()
+
+    random.seed(args.seed)
+
+    filter_labels = set(args.group.split(",")) if args.group else None
+
+    active = [
+        (label, path, family) for label, path, family in GROUPS
+        if (filter_labels is None or label in filter_labels) and path.exists()
+    ]
+    if not active:
+        print("No matching groups found.")
+        sys.exit(1)
+
+    print(f"\n{'='*75}")
+    print(f"  Consonant bench — accent={args.accent}, n={args.n} clips/group")
+    print(f"{'='*75}")
+
+    summary: list[tuple[str, str, dict]] = []
+    for label, manifest_path, family in active:
+        entries = load_manifest(manifest_path)
+        print(f"\n── {label}  [{family}]  ({len(entries)} entries in manifest)")
+        agg = bench_group(
+            label, entries, manifest_path,
+            n=args.n, verbose=args.verbose, accent_target=args.accent,
+        )
+        if agg:
+            summary.append((label, family, agg))
+        else:
+            print("   (no results)")
+
+    if not summary:
+        print("\nNo results.")
+        return
+
+    print(f"\n{'='*75}")
+    print("  SUMMARY  (column = mean across clips scored; NaN = no tokens of that class)")
+    print(f"{'='*75}")
+    hdr = f"{'Label':<20} {'Family':<10} {'composite':>9} {'fricative':>9} {'stop_vot':>9} {'rhotic':>9} {'lateral':>9}  n"
+    print(hdr)
+    print("─" * len(hdr))
+    for label, family, agg in summary:
+        print(
+            f"{label:<20} {family:<10} "
+            f"{_fmt(agg.get('composite', float('nan')))} "
+            f"{_fmt(agg.get('fricative', float('nan')))} "
+            f"{_fmt(agg.get('stop_vot', float('nan')))} "
+            f"{_fmt(agg.get('rhotic', float('nan')))} "
+            f"{_fmt(agg.get('lateral', float('nan')))} "
+            f" {int(agg.get('n', 0))}"
+        )
+
+    # Print expected ordering note
+    print(f"\n{'─'*75}")
+    print("  Expected ordering:  RP/GA natives ≥ TTS ≥ real BC > owner")
+    print("  Rhotic/lateral may show NaN for groups whose clips have no /r/ or /l/ tokens.")
+
+
+if __name__ == "__main__":
+    main()

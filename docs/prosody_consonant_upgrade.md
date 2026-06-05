@@ -206,6 +206,114 @@ All within what's already used: `numpy`, `scipy`, `librosa`, `praat-parselmouth`
 
 ---
 
+---
+
+## Phase 0.21 — Consonant module implementation (completed 2026-06-05)
+
+### What was built
+
+`accent_coach/comparison/consonants/` subpackage replacing the old single-float stub:
+
+| File | What it does |
+|---|---|
+| `fricatives.py` | CoG scoring for all 8 English fricatives (`/s z ʃ ʒ θ ð f v/`); TH→/s/ substitution diagnosis (CoG > 5500 Hz) |
+| `stops.py` | VOT scoring from pre-extracted `StopFeatures`; under-aspiration penalty (VOT < 35 ms) |
+| `liquids.py` | `/r/` F3 depression via parselmouth Burg (5-formant, gender-aware ceiling); `/l/` dark vs clear F2 with syllable-final gate |
+| `aggregator.py` | `ConsonantScore` dataclass; weight redistribution when sub-class has no tokens |
+
+Models added: `ConsonantScore` (pydantic), `ComparisonResult.consonant_breakdown`.
+Reference norms added to `rp_norms.py` and `genam_norms.py`: fricative CoG, rhotic F3, lateral F2, GA VOT.
+
+Tests: 32 new tests across `test_consonants.py` (interface/TDD) and `test_consonants_quality.py` (business-logic calibration). All 183 tests green.
+
+### Bench results (2026-06-05, n=10 clips/group, accent=rp)
+
+```
+Group              composite  fricative  stop_vot   rhotic  lateral
+RP Fry                  25.1       22.3       6.1     31.8     64.5
+RP Lindsey              27.6       30.5       3.2     32.2     64.8
+Real BC                 28.4       22.0      23.4     33.2     60.7
+TTS BC (IndexTTS-2)     25.6       19.9       6.2     28.8     59.4
+Owner                   19.9       18.8       2.7     23.4     45.0
+GA natives (Harris)     35.0       27.0       9.8     70.9     52.0
+```
+
+### What works
+
+**Laterals discriminate correctly.** RP natives score 64–65 (best dark /l/), owner lowest at 45.
+The F2-based dark-vs-clear scoring with syllable-final gate is acoustically sound.
+
+**Owner is the lowest overall (19.9) on composite.** The primary ranking requirement holds
+even with broken sub-scores — owner's low lateral score (45) and low rhotic (23) drives it down.
+
+**GA rhotics dominate (70.9).** Harris/Huberman/Sapolsky produce retroflex /r/ in every position;
+F3 depression fires cleanly. Matches linguistic expectation.
+
+### Three broken sub-scores — root causes and fixes needed
+
+#### VOT (all groups near 0–10, RP natives = 6)
+
+The `extract_vot()` burst detector fails on natural speech. The burst search window is
+40 ms after the G2P-derived phoneme start timestamp. G2P assigns phoneme boundaries by
+**uniform splitting of word duration**, so the stop timestamp is rarely acoustically
+accurate — the burst can fall outside the 40 ms window and is not detected.
+
+Fix: widen burst search to 80–100 ms, or switch to a proper forced-alignment model
+(WhisperX phone-level CTC) that gives per-phoneme acoustic boundaries. Until then
+`stop_aspiration_score` is unreliable in the consonant composite; `score_aspiration()`
+in `scoring.py` (which also uses `StopFeatures`) has the same problem.
+
+#### Rhotics — RP non-rhotic position penalty
+
+RP Fry/Lindsey score 31–32 on rhotics despite being native speakers. RP is
+**non-rhotic**: post-vocalic /r/ (e.g., "together", "over", "bird") is not pronounced.
+But the G2P pipeline always emits an /r/ phoneme for those words; the scorer measures F3
+at that position, finds no depressed F3 (because no /r/ was produced), and penalises.
+
+Fix: gate rhotic scoring on pre-vocalic position only. A phoneme followed by a vowel
+phoneme in `user.phonemes` should be scored; all other /r/ tokens should be skipped for
+non-rhotic target accents (`accent_target == "rp"`). Keep scoring all positions for GA
+(`accent_target == "genam"`) since GA is fully rhotic.
+
+#### Fricative CoG reference values are citation-form, not conversational
+
+All groups score 18–30 on fricatives. The reference values in `rp_norms.py`
+(`/s/` = 7000 Hz, `/ʃ/` = 3800 Hz, etc.) come from Jongman et al. (2000) citation-form
+readings in quiet conditions. In natural conversational speech, CoG is typically 500–1000 Hz
+lower due to coarticulation and speaking rate. A speaker producing a perfect /s/ in
+running speech might measure at 6000–6500 Hz — a 500–1000 Hz gap from the reference
+produces an exponential penalty even for native speakers.
+
+Fix (two options, in priority order):
+1. **Use comparison mode** (user CoG vs target speaker CoG) rather than absolute mode.
+   This requires passing target audio and target phoneme timestamps to `score_fricatives()`.
+   Target IS the reference — absolute reference values become only a sanity cross-check.
+2. **Recalibrate corpus constants** by measuring CoG from the modern_rp_corpus / genam_lecture_corpus
+   clips that already have transcripts and can be aligned. Replace the Jongman citation values
+   with corpus-derived conversational means.
+
+### Aspiration double-counting (known, deferred)
+
+`scoring.py` calls `score_aspiration()` at 15% weight AND the consonant composite includes
+stops at 35% of its 15% weight (≈ 5.25% total). Aspiration contributes ~20% of the total
+composite vs the intended 15%. Tracked in `aggregator.py` docstring. Will be resolved when
+`analyze.py` is built and `score_aspiration()` is retired.
+
+### Next steps for consonants (priority order)
+
+1. **Fix rhotic position gate** — 1 day. Gate RP rhotic scoring to pre-vocalic tokens only.
+   Will fix RP native scores from ~32 to something close to GA levels.
+2. **Fix VOT** — switch from G2P timestamps to WhisperX phone-level CTC alignment, OR widen
+   burst search window in `extract_vot()`. High impact: VOT is the clearest L2 marker for
+   Slavic/Romance speakers.
+3. **Recalibrate fricative CoG** — measure conversational CoG from existing corpora and replace
+   Jongman citation values. Or: default to comparison mode (target CoG) when target audio is
+   available.
+4. **Retire double-counting** — fold `score_aspiration()` into consonant weight when `analyze.py`
+   is built.
+
+---
+
 ## Constants inventory (Phase 0.18 audit — move to config)
 
 All scoring constants are currently module-level globals, making them hard to tune
