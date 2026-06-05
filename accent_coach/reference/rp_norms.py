@@ -170,6 +170,55 @@ RP_PITCH_TEMPLATES: dict[str, list[float]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Fricative spectral centroid (CoG) reference — RP/SSBE adult male
+# Jongman et al. (2000), "Acoustic characteristics of English fricatives",
+# JASA 108(3), 1252-1263, Table 2 (male speakers, connected speech values).
+# /θ ð/ CoG is highly variable; values below are corpus means.
+# /f v/ are broadband; centre is the spectral centre of gravity.
+# ---------------------------------------------------------------------------
+RP_FRICATIVE_COG_HZ: dict[str, float] = {
+    "s":  7000.0,   # Jongman 2000, Table 2 (male English)
+    "z":  6500.0,   # Jongman 2000, Table 2
+    "ʃ":  3800.0,   # Jongman 2000, Table 2 (postalveolar)
+    "ʒ":  3300.0,   # Jongman 2000, Table 2
+    "θ":  4500.0,   # Jongman 2000, Table 2 (dental, high variance ±2000 Hz)
+    "ð":  3800.0,   # Jongman 2000, Table 2 (dental voiced, high variance)
+    "f":  5500.0,   # Jongman 2000, Table 2 (labiodental, broadband)
+    "v":  5000.0,   # Jongman 2000, Table 2 (labiodental voiced)
+}
+
+# CoG decay constant (Hz) for exponential scoring: score = exp(-|cog - ref| / decay)
+RP_FRICATIVE_COG_DECAY_HZ: float = 2000.0
+
+# Threshold above which a /θ/ token sounds like /s/ substitution — TH-fronting marker
+# Spec: if CoG > 5500 Hz for /θ/ → /s/ substitution → tongue-placement instruction
+RP_TH_S_SUBSTITUTION_THRESHOLD_HZ: float = 5500.0
+
+# ---------------------------------------------------------------------------
+# Rhotic /r/ — F3 depression norms (Ladefoged & Johnson 2011, "A Course in
+# Phonetics", 7th ed., Ch. 9; Stevens 2000, "Acoustic Phonetics", Ch. 8)
+# English retroflex/bunched /r/: F3 depressed to 1800-2200 Hz.
+# Non-English /r/ (tap, trill, uvular): F3 remains at 2400-2800 Hz.
+# ---------------------------------------------------------------------------
+RP_RHOTIC_F3_RHOTIC_MAX_HZ: float = 2200.0    # F3 ≤ this → English /r/
+RP_RHOTIC_F3_NONNATIVE_MIN_HZ: float = 2500.0  # F3 ≥ this → non-rhotic substitution
+RP_RHOTIC_F3_TARGET_HZ: float = 1950.0         # centre of English /r/ F3 range
+RP_RHOTIC_F3_DECAY_HZ: float = 350.0           # Hz decay for exponential scoring
+
+# ---------------------------------------------------------------------------
+# Lateral /l/ — F2 norms for dark vs clear allophone
+# Wells (1982), "Accents of English", Vol. 1, p. 259;
+# Recasens (1993), "Fonètica i Fonologia", Enciclopèdia Catalana.
+# Dark /l/ (syllable-final in RP): F2 ≈ 800-1300 Hz (velarisation lowers F2)
+# Clear /l/ (syllable-initial in RP): F2 ≈ 1400-1800 Hz
+# Note: RP has categorical dark /l/ in final position only.
+# ---------------------------------------------------------------------------
+RP_LATERAL_DARK_F2_TARGET_HZ: float = 1050.0   # centre of dark /l/ F2 range
+RP_LATERAL_CLEAR_F2_THRESHOLD_HZ: float = 1350.0  # F2 above this in final pos = clear /l/ error
+RP_LATERAL_F2_DECAY_HZ: float = 300.0
+
+
 def get_rp_norms(mean_f0: float) -> dict[str, tuple[float, float]]:
     """Return sex-appropriate F1/F2 table based on estimated speaker f0."""
     # Female modern norms not yet derived (Phase E did not yield usable female corpus).

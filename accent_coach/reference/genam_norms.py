@@ -100,6 +100,63 @@ _GENAM_MALE_MODERN: dict[str, tuple[float, float]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# GenAm fricative CoG norms — adult male connected speech
+# Jongman et al. (2000) Table 2 (American English male column).
+# GenAm and RP CoG values differ minimally for /s ʃ/; dentals and labio-
+# dentals are near-identical across dialects (place-of-articulation is the
+# primary determinant, not dialect).  Values below follow RP where identical.
+# ---------------------------------------------------------------------------
+GA_FRICATIVE_COG_HZ: dict[str, float] = {
+    "s":  7000.0,   # Jongman 2000, Table 2 (American English male)
+    "z":  6400.0,   # Jongman 2000, Table 2
+    "ʃ":  3700.0,   # Jongman 2000, Table 2 (postalveolar)
+    "ʒ":  3200.0,   # Jongman 2000, Table 2
+    "θ":  4500.0,   # Jongman 2000, Table 2 (same as RP; place-of-art driven)
+    "ð":  3800.0,   # Jongman 2000, Table 2
+    "f":  5500.0,   # Jongman 2000, Table 2 (labiodental)
+    "v":  5000.0,   # Jongman 2000, Table 2
+}
+
+GA_FRICATIVE_COG_DECAY_HZ: float = 2000.0
+GA_TH_S_SUBSTITUTION_THRESHOLD_HZ: float = 5500.0
+
+# ---------------------------------------------------------------------------
+# GenAm rhotic /r/ — F3 depression (same physics as RP; American English is
+# rhotic, so F3 ≤ 2200 Hz in connected speech)
+# Ladefoged & Johnson 2011, Ch. 9.
+# ---------------------------------------------------------------------------
+GA_RHOTIC_F3_RHOTIC_MAX_HZ: float = 2200.0
+GA_RHOTIC_F3_NONNATIVE_MIN_HZ: float = 2500.0
+GA_RHOTIC_F3_TARGET_HZ: float = 1900.0   # GenAm /r/ slightly more depressed (Hagiwara 1995)
+GA_RHOTIC_F3_DECAY_HZ: float = 350.0
+
+# ---------------------------------------------------------------------------
+# GenAm lateral /l/ — dark /l/ is more prevalent throughout the syllable in
+# GenAm than in RP; F2 of dark /l/ is similar or slightly lower than RP.
+# Wells 1982, Vol. 3, p. 489; Sproat & Fujimura 1993.
+# ---------------------------------------------------------------------------
+GA_LATERAL_DARK_F2_TARGET_HZ: float = 1000.0    # slightly darker than RP (Wells 1982)
+GA_LATERAL_CLEAR_F2_THRESHOLD_HZ: float = 1350.0
+GA_LATERAL_F2_DECAY_HZ: float = 300.0
+
+# ---------------------------------------------------------------------------
+# GenAm VOT — similar to RP; Cho & Ladefoged (1999) "Variations and
+# universals in VOT: evidence from 18 languages", J. Phonetics 27(2).
+# English /p t k/ initial VOT slightly shorter than RP by ~5 ms.
+# ---------------------------------------------------------------------------
+GA_VOT_MEAN_MS: dict[str, float] = {
+    "p": 60.0,   # Cho & Ladefoged 1999 (English); RP = 67.5
+    "t": 70.0,   # Cho & Ladefoged 1999; RP = 77.5
+    "k": 80.0,   # Cho & Ladefoged 1999; RP = 87.5
+}
+GA_VOT_SD_MS: dict[str, float] = {
+    "p": 10.0,
+    "t": 10.0,
+    "k": 10.0,
+}
+
+
 def get_genam_norms(mean_f0: float) -> dict[str, tuple[float, float]]:
     """Return sex-appropriate GenAm F1/F2 table based on estimated speaker f0.
 

@@ -54,11 +54,13 @@ def compare(
     rhythm_bd = score_rhythm(user, target=target)
     stress_score = score_stress(user, target=target)
     intonation_bd = score_intonation(user, target=target)
-    consonant_score = score_consonants(user, user_audio, user_sr, target=target)
+    consonant_bd = score_consonants(
+        user, user_audio, user_sr, target=target, accent_target=accent_target
+    )
 
     skill_scores = {
         "vowels":      vowel_score,
-        "consonants":  consonant_score,
+        "consonants":  consonant_bd.score,
         "aspiration":  aspiration_bd.score,
         "rhythm":      rhythm_bd.score,
         "stress":      stress_score,
@@ -77,4 +79,5 @@ def compare(
         rhythm_breakdown=rhythm_bd,
         aspiration_breakdown=aspiration_bd,
         intonation_breakdown=intonation_bd,
+        consonant_breakdown=consonant_bd,
     )

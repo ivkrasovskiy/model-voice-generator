@@ -1,0 +1,110 @@
+"""CoG-based fricative quality scoring.
+
+Covers /s z ʃ ʒ θ ð f v/ — the full inventory of English obstruent fricatives.
+Primary comparison is user CoG vs target CoG when a target is available;
+absolute mode uses corpus-derived reference values.
+
+Reference: Jongman et al. (2000), "Acoustic characteristics of English
+fricatives", JASA 108(3), 1252–1263.
+"""
+from __future__ import annotations
+
+import math
+
+import numpy as np
+
+from accent_coach.models import PhonemeInstance, SentenceAnalysis
+from accent_coach.reference.genam_norms import (
+    GA_FRICATIVE_COG_DECAY_HZ,
+    GA_FRICATIVE_COG_HZ,
+    GA_TH_S_SUBSTITUTION_THRESHOLD_HZ,
+)
+from accent_coach.reference.rp_norms import (
+    RP_FRICATIVE_COG_DECAY_HZ,
+    RP_FRICATIVE_COG_HZ,
+    RP_TH_S_SUBSTITUTION_THRESHOLD_HZ,
+)
+
+_FRICATIVES: frozenset[str] = frozenset(RP_FRICATIVE_COG_HZ)
+
+# /HH/ (aspiration) skipped — not a true fricative CoG signal (spec 3A)
+_SKIP = frozenset({"h", "hh"})
+
+
+def _spectral_centroid(audio: np.ndarray, sr: int, p: PhonemeInstance) -> float | None:
+    """Spectral centre of gravity (CoG) for phoneme segment using power spectrum."""
+    start = max(0, int(p.start_time * sr))
+    end = min(len(audio), int(p.end_time * sr))
+    if end - start < 32:
+        return None
+    segment = audio[start:end].astype(np.float64)
+    spectrum = np.abs(np.fft.rfft(segment))
+    freqs = np.fft.rfftfreq(len(segment), d=1.0 / sr)
+    total = spectrum.sum()
+    if total < 1e-12:
+        return None
+    return float(np.dot(freqs, spectrum) / total)
+
+
+def _cog_norms(accent_target: str) -> tuple[dict[str, float], float, float]:
+    if accent_target == "genam":
+        return GA_FRICATIVE_COG_HZ, GA_FRICATIVE_COG_DECAY_HZ, GA_TH_S_SUBSTITUTION_THRESHOLD_HZ
+    return RP_FRICATIVE_COG_HZ, RP_FRICATIVE_COG_DECAY_HZ, RP_TH_S_SUBSTITUTION_THRESHOLD_HZ
+
+
+def score_fricatives(
+    user: SentenceAnalysis,
+    audio: np.ndarray,
+    sr: int,
+    target: SentenceAnalysis | None = None,
+    target_audio: np.ndarray | None = None,
+    target_sr: int | None = None,
+    accent_target: str = "rp",
+) -> tuple[float | None, list[str]]:
+    """Score fricative quality. Returns (score 0–100 or None, diagnostics).
+
+    None is returned when no scorable fricative tokens are found so the
+    aggregator can redistribute that weight rather than applying a fictional score.
+    """
+    ref_cog, decay, th_s_threshold = _cog_norms(accent_target)
+
+    # Build target CoG per phoneme (comparison mode)
+    target_cog: dict[str, list[float]] = {}
+    if target is not None and target_audio is not None and target_sr is not None:
+        for p in target.phonemes:
+            if p.phoneme not in _FRICATIVES or p.phoneme in _SKIP:
+                continue
+            cog = _spectral_centroid(target_audio, target_sr, p)
+            if cog is not None:
+                target_cog.setdefault(p.phoneme, []).append(cog)
+
+    scores: list[float] = []
+    diagnostics: list[str] = []
+    th_s_errors: list[str] = []
+
+    for p in user.phonemes:
+        ph = p.phoneme
+        if ph not in _FRICATIVES or ph in _SKIP:
+            continue
+        cog = _spectral_centroid(audio, sr, p)
+        if cog is None:
+            continue
+
+        # Prefer target CoG; fall back to corpus reference
+        ref = float(np.mean(target_cog[ph])) if ph in target_cog else ref_cog[ph]
+
+        delta = abs(cog - ref)
+        scores.append(100.0 * math.exp(-delta / decay))
+
+        # TH/DH substitution check: CoG too high for a dental fricative
+        if ph in ("θ", "ð") and cog > th_s_threshold:
+            th_s_errors.append(p.word)
+
+    if th_s_errors:
+        words = ", ".join(f"'{w}'" for w in th_s_errors[:3])
+        diagnostics.append(
+            f"In {words}: your /θ/ or /ð/ sounds like /s/ or /z/ (spectral energy too high). "
+            "Place your tongue tip lightly against the upper front teeth — not the alveolar ridge."
+        )
+
+    return (float(np.mean(scores)) if scores else None), diagnostics

@@ -186,6 +186,15 @@ context.
   before and after any change touching IndexTTS-2 paths.
 - Run all three with `bash scripts/check_repo.sh` before declaring a stage done.
 
+## Accent coach quality rules
+
+- **TDD**: write failing tests before implementing any feature. Tests must fail for the right reason (missing feature, not import error) before implementation begins.
+- **Scoring sanity**: consonant and vowel quality scores must rank **native RP/GenAm speakers > TTS > owner**. A metric that grades the owner above natives is broken.
+- **Dual-accent coverage**: every scoring module must handle both modern RP (Fry/Lindsey norms) and General American (Hillenbrand/modern corpus norms) via `accent_target` parameter.
+- **Reuse first**: before writing a new module, check if `accent_coach/pipeline/`, `accent_coach/comparison/`, or `accent_coach/reference/` already implements the needed primitive. Wrap or extend; do not duplicate.
+- **No speed-quality trade-off**: prefer acoustic accuracy (parselmouth Burg LPC, proper bandpass filters) over cheap approximations. Compute time is not a constraint in scoring pipelines.
+- **Review gate**: after completing a tests batch and after completing a feature implementation, spawn a code-review agent to find critical mistakes before committing.
+
 ## Conventions
 
 - Use `uv` for everything Python-package related. Never raw pip.

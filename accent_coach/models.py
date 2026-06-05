@@ -76,6 +76,15 @@ class IntonationBreakdown(BaseModel):
     score: float
 
 
+class ConsonantScore(BaseModel):
+    score: float
+    fricative_score: float | None = None
+    stop_aspiration_score: float | None = None
+    rhotic_score: float | None = None
+    lateral_score: float | None = None
+    diagnostics: list[str] = []
+
+
 class ComparisonResult(BaseModel):
     skill_scores: dict[str, float]
     composite_score: float
@@ -83,3 +92,4 @@ class ComparisonResult(BaseModel):
     rhythm_breakdown: RhythmBreakdown
     aspiration_breakdown: AspirationBreakdown
     intonation_breakdown: IntonationBreakdown
+    consonant_breakdown: ConsonantScore | None = None
