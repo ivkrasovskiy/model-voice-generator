@@ -171,17 +171,18 @@ RP_PITCH_TEMPLATES: dict[str, list[float]] = {
 
 
 # ---------------------------------------------------------------------------
-# Fricative spectral centroid (CoG) reference — RP/SSBE adult male
-# Jongman et al. (2000), "Acoustic characteristics of English fricatives",
-# JASA 108(3), 1252-1263, Table 2 (male speakers, connected speech values).
-# /θ ð/ CoG is highly variable; values below are corpus means.
-# /f v/ are broadband; centre is the spectral centre of gravity.
+# Fricative spectral centroid (CoG) reference — Jongman et al. (2000),
+# "Acoustic characteristics of English fricatives", JASA 108(3), 1252–1263,
+# Table 2 (American English male speakers, connected speech).
+# Fricative CoG is determined primarily by place of articulation, not dialect;
+# no equivalent large-scale RP corpus exists for these phonemes.  Declared
+# accent-neutral: RP_FRICATIVE_COG_HZ is identical to GA_FRICATIVE_COG_HZ.
 # ---------------------------------------------------------------------------
 RP_FRICATIVE_COG_HZ: dict[str, float] = {
-    "s":  7000.0,   # Jongman 2000, Table 2 (male English)
-    "z":  6500.0,   # Jongman 2000, Table 2
-    "ʃ":  3800.0,   # Jongman 2000, Table 2 (postalveolar)
-    "ʒ":  3300.0,   # Jongman 2000, Table 2
+    "s":  7000.0,   # Jongman 2000, Table 2 (American English male)
+    "z":  6400.0,   # Jongman 2000, Table 2
+    "ʃ":  3700.0,   # Jongman 2000, Table 2 (postalveolar)
+    "ʒ":  3200.0,   # Jongman 2000, Table 2
     "θ":  4500.0,   # Jongman 2000, Table 2 (dental, high variance ±2000 Hz)
     "ð":  3800.0,   # Jongman 2000, Table 2 (dental voiced, high variance)
     "f":  5500.0,   # Jongman 2000, Table 2 (labiodental, broadband)
@@ -216,6 +217,7 @@ RP_RHOTIC_F3_DECAY_HZ: float = 350.0           # Hz decay for exponential scorin
 # ---------------------------------------------------------------------------
 RP_LATERAL_DARK_F2_TARGET_HZ: float = 1050.0   # centre of dark /l/ F2 range
 RP_LATERAL_CLEAR_F2_THRESHOLD_HZ: float = 1350.0  # F2 above this in final pos = clear /l/ error
+RP_LATERAL_CLEAR_F2_TARGET_HZ: float = 1550.0  # target F2 for syllable-initial clear /l/
 RP_LATERAL_F2_DECAY_HZ: float = 300.0
 
 

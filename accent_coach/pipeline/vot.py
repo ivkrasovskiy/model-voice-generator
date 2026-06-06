@@ -52,7 +52,7 @@ def extract_vot(audio: np.ndarray, sr: int, stop: PhonemeInstance) -> float | No
     hf_energy = _bandpass_energy(segment, sr, _HF_LO, _HF_HI)
     burst_search_frames = int(_BURST_SEARCH_MS / _HOP_MS)
     search = hf_energy[: min(burst_search_frames, len(hf_energy))]
-    median_e = np.median(hf_energy)
+    median_e = np.median(search)
     if median_e == 0:
         return None
     burst_candidates = np.where(search > 3 * median_e)[0]
@@ -68,7 +68,7 @@ def extract_vot(audio: np.ndarray, sr: int, stop: PhonemeInstance) -> float | No
         frame_start = i * hop
         frame_end = min(frame_start + hop * 4, len(segment))
         frame = segment[frame_start:frame_end]
-        if _autocorr_peak(frame) > 0.5:
+        if _autocorr_peak(frame) > 0.35:
             voice_time = start_sample / sr + i * _HOP_MS / 1000
             break
 

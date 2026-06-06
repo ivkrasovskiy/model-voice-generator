@@ -138,6 +138,7 @@ GA_RHOTIC_F3_DECAY_HZ: float = 350.0
 # ---------------------------------------------------------------------------
 GA_LATERAL_DARK_F2_TARGET_HZ: float = 1000.0    # slightly darker than RP (Wells 1982)
 GA_LATERAL_CLEAR_F2_THRESHOLD_HZ: float = 1350.0
+GA_LATERAL_CLEAR_F2_TARGET_HZ: float = 1500.0  # GA clear /l/ slightly darker than RP (Wells 1982)
 GA_LATERAL_F2_DECAY_HZ: float = 300.0
 
 # ---------------------------------------------------------------------------

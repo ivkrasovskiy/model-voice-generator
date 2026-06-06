@@ -342,3 +342,299 @@ def test_native_rp_beats_slavic_l2_by_at_least_25():
         f"Native={native.score:.1f} vs L2={l2.score:.1f} gap={gap:.1f}. "
         "Expected gap ≥ 25 pts — native must score well above L2."
     )
+
+
+# ---------------------------------------------------------------------------
+# Section 6 — §0: RP/GA fricative table provenance
+# ---------------------------------------------------------------------------
+
+
+def test_fricative_cog_tables_are_accent_neutral():
+    """RP_FRICATIVE_COG_HZ must equal GA_FRICATIVE_COG_HZ (same Jongman 2000 source).
+
+    Both tables cite American English Jongman et al. (2000). Different values
+    (z: 6500 vs 6400, ʃ: 3800 vs 3700, ʒ: 3300 vs 3200) are false precision
+    from copying the same corpus with slight rounding differences.
+    Fix: update RP table to match GA (the correctly-cited source).
+    Fails as long as the two tables are separate copies with different values.
+    """
+    from accent_coach.reference.rp_norms import RP_FRICATIVE_COG_HZ
+    from accent_coach.reference.genam_norms import GA_FRICATIVE_COG_HZ
+
+    differing = [(k, RP_FRICATIVE_COG_HZ[k], GA_FRICATIVE_COG_HZ[k])
+                 for k in RP_FRICATIVE_COG_HZ if RP_FRICATIVE_COG_HZ[k] != GA_FRICATIVE_COG_HZ[k]]
+    assert not differing, (
+        f"Tables differ at: {differing}. Both cite Jongman 2000 (American English). "
+        "Declare fricative CoG accent-neutral: update RP values to match GA."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section 7 — §4A: coda-cluster /l/ heuristic
+# ---------------------------------------------------------------------------
+
+
+def test_coda_cluster_l_scored_as_syllable_final():
+    """Coda-cluster /l/ in 'milk' (M IH1 L K) must be treated as syllable-final.
+
+    Current heuristic: word_phones[-1] == 'l' → False for 'milk' (ends in 'k').
+    So the /l/ is scored as initial-position (no dark-/l/ check), and a clear
+    /l/ (F2=1700 Hz) gets a high score when it should get a low one.
+    Fails as long as word_phones[-1] == 'l' is the only syllable-final test.
+    """
+    from accent_coach.comparison.consonants.liquids import score_liquids
+
+    seg = _resonator([(450, 80), (1700, 120), (2700, 200), (3700, 250)])
+    audio = _place(seg, 0.30)
+    phonemes = [
+        _ph("m",  "M",   0.00, 0.10, word="milk"),
+        _ph("ɪ",  "IH1", 0.10, 0.20, word="milk"),
+        _ph("l",  "L",   0.30, 0.43, word="milk"),
+        _ph("k",  "K",   0.43, 0.53, word="milk"),
+    ]
+    _, lateral, _ = score_liquids(_sentence(phonemes), audio, SR)
+    assert lateral is not None and lateral < 55, (
+        f"lateral={lateral:.1f} — clear /l/ (F2=1700 Hz) in 'milk' coda must score < 55. "
+        "word_phones[-1]=='l' misses pre-consonant coda /l/: fix to check next phoneme."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section 8 — §4B: accent-aware initial /l/ clear target
+# ---------------------------------------------------------------------------
+
+
+def test_lateral_initial_clear_target_differs_by_accent():
+    """Initial /l/ score must differ between 'rp' and 'genam' accent targets.
+
+    Current code: clear_target = 1550.0 is hardcoded for both accents → identical
+    scores regardless of accent_target parameter.
+    Fix: add RP_LATERAL_CLEAR_F2_TARGET_HZ / GA_LATERAL_CLEAR_F2_TARGET_HZ
+    to the norms files and branch on accent_target.
+    """
+    from accent_coach.comparison.consonants.liquids import score_lateral
+
+    # F2 = 1550 Hz — exactly the RP clear target; GA target differs
+    seg = _resonator([(450, 80), (1550, 120), (2600, 200), (3600, 250)])
+    audio = _place(seg, 0.02)
+    ph = _ph("l", "L", start=0.02, end=0.17)
+    s_rp  = score_lateral(audio, SR, ph, syllable_final=False, accent_target="rp")
+    s_ga  = score_lateral(audio, SR, ph, syllable_final=False, accent_target="genam")
+    assert s_rp != s_ga, (
+        f"rp={s_rp:.1f} == genam={s_ga:.1f}: clear_target=1550.0 is hardcoded for both. "
+        "Branch on accent_target using RP_LATERAL_CLEAR_F2_TARGET_HZ / GA_LATERAL_CLEAR_F2_TARGET_HZ."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section 9 — §1A: power spectrum for CoG
+# ---------------------------------------------------------------------------
+
+
+def test_power_spectrum_cog_matches_f_reference():
+    """/f/ bimodal signal whose power-spectrum CoG = 5500 Hz (reference) must score ≥ 95.
+
+    Signal: tone at 5000 Hz (amplitude 2) + tone at 7500 Hz (amplitude 1).
+      Magnitude CoG = (5000×2 + 7500×1) / 3 ≈ 5833 Hz → score ≈ 85
+      Power CoG    = (5000×4 + 7500×1) / 5  = 5500 Hz → score = 100
+
+    Both frequencies are well above the 2000 Hz HP cutoff so the HP method
+    (hard mask or Butterworth) does not affect the result — this test isolates
+    the magnitude-vs-power spectrum bug (§1A).
+    Fails with current magnitude spectrum (score ≈ 85 < 95).
+    """
+    from accent_coach.comparison.consonants.fricatives import score_fricatives
+
+    n = int(0.15 * SR)
+    t = np.arange(n, dtype=np.float64) / SR
+    # amplitude 2 at 5000 Hz + amplitude 1 at 7500 Hz
+    signal = (2.0 * np.sin(2 * np.pi * 5000 * t)
+              + 1.0 * np.sin(2 * np.pi * 7500 * t)).astype(np.float32)
+    signal = signal / (np.abs(signal).max() + 1e-9) * 0.8
+    audio = _place(signal, 0.02)
+    ph = _ph("f", "F", start=0.02, end=0.17)
+    score, _ = score_fricatives(_sentence([ph]), audio, SR)
+    assert score is not None and score >= 95, (
+        f"/f/ bimodal signal (power CoG = 5500 Hz = reference) scored {score:.1f}. "
+        "Expected ≥ 95. Magnitude spectrum gives CoG ≈ 5833 Hz → score ≈ 85. "
+        "Fix: spectrum = np.abs(np.fft.rfft(segment)) ** 2"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section 10 — §1B: Butterworth HP not hard mask
+# ---------------------------------------------------------------------------
+
+
+def test_butterworth_hp_not_hard_mask():
+    """Butterworth HP gives accurate CoG; hard mask lets float-noise dominate.
+
+    Signal: equal-amplitude tones at 1500 Hz and 4000 Hz for /ʒ/ (GA ref 3200 Hz).
+    The 1500 Hz component helps pull the true CoG toward the 3200 Hz reference.
+
+    Hard mask at 2000 Hz: zeroes bin 225 (1500 Hz) → only 4000 Hz remains →
+      CoG = 4000 Hz → score vs 3200 Hz = exp(-800/2000) ≈ 67 < 73.
+    Butterworth HP at 2000 Hz: 1500 Hz attenuated (-5 dB) but present →
+      CoG pulled toward reference → score ≈ 77–94 ≥ 73.
+
+    Both 1500 Hz and 4000 Hz map to exact FFT bins for n=2400 (no leakage).
+    Fails with current hard-mask implementation (score ≈ 67 < 73).
+    """
+    from accent_coach.comparison.consonants.fricatives import score_fricatives
+
+    n = int(0.15 * SR)  # = 2400: 1500 Hz → bin 225, 4000 Hz → bin 600 (exact)
+    t = np.arange(n, dtype=np.float64) / SR
+    sig = (np.sin(2 * np.pi * 1500 * t) + np.sin(2 * np.pi * 4000 * t)).astype(np.float32)
+    audio = _place(sig, 0.02)
+    ph = _ph("ʒ", "ZH", start=0.02, end=0.17)
+    score, _ = score_fricatives(_sentence([ph]), audio, SR, accent_target="genam")
+    assert score is not None and score >= 73, (
+        f"score={score:.1f} — bimodal /ʒ/ (1500+4000 Hz) scored below 73. "
+        "Hard mask zeroes the 1500 Hz component → CoG=4000 Hz → score≈67. "
+        "Butterworth HP (-5 dB at 1500 Hz) preserves it → CoG~3500 Hz → score≥73. "
+        "Fix §1B: apply butter(4, 2000/nyq, 'high') to segment in time domain before FFT."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section 11 — §2B: VOT median on search window
+# ---------------------------------------------------------------------------
+
+
+def test_vot_median_on_search_window_detects_burst():
+    """VOT burst detection must use search-window median, not full-window median.
+
+    Scenario: moderate burst at stop boundary + loud broadband noise AFTER the
+    search window.  Full-window median is elevated by the loud post-search noise,
+    raising 3× threshold above the burst energy → burst not detected (vot = None).
+    Search-window median is near the background level → 3× threshold is low →
+    burst detected → vot ≈ 70 ms.
+
+    Fix: `median_e = np.median(search)` (pipeline/vot.py line ~55)
+    """
+    import numpy as np
+    from accent_coach.models import PhonemeInstance
+    from accent_coach.pipeline.vot import extract_vot
+
+    _SR = 16_000
+    n = int(0.35 * _SR)
+    rng = np.random.default_rng(0)
+
+    audio = (rng.standard_normal(n) * 0.01).astype(np.float32)  # low background
+
+    # Moderate burst at 0.02 s (within search window)
+    b_s = int(0.02 * _SR)
+    audio[b_s: b_s + int(0.005 * _SR)] += (
+        rng.standard_normal(int(0.005 * _SR)) * 0.25
+    ).astype(np.float32)
+
+    # Voicing onset at 0.09 s — amplitude 0.8 sine (autocorr ≈ 0.58 > 0.5 for
+    # a fully-voiced frame, ensuring voicing is detectable with the current
+    # threshold = 0.5 so the §2B test is independent of §2C).
+    v_s = int(0.09 * _SR)
+    t_v = np.arange(n - v_s, dtype=np.float64) / _SR
+    audio[v_s:] += (0.8 * np.sin(2 * np.pi * 120 * t_v)).astype(np.float32)
+
+    # Loud broadband noise starting at 0.11 s (frame 22 of the 44-frame segment).
+    # Frames 21-43 are loud (23/44 = 52 %), so the full-window median is in the
+    # loud range and suppresses the burst under the 3× threshold.
+    # Frame 18's 4-hop autocorr window (samples 1440-1759) ends before loud at
+    # sample 1760, so the voicing detection at frame 18 is uncontaminated.
+    loud_s = int(0.11 * _SR)
+    audio[loud_s:] += (rng.standard_normal(n - loud_s) * 0.9).astype(np.float32)
+
+    stop = PhonemeInstance(
+        phoneme="p", arpabet="P", start_time=0.02, end_time=0.07,
+        sentence_id=1, word="pop", is_stressed=True,
+    )
+    vot = extract_vot(audio, _SR, stop)
+    assert vot is not None and 40 < vot < 120, (
+        f"vot={vot} — burst at 0.02 s, voicing at 0.09 s, loud noise after search window. "
+        "Full-window median is elevated above the burst by the loud post-search noise. "
+        "Fix: median_e = np.median(search)  (search window only)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section 12 — §2C: voicing onset threshold 0.5 → 0.35
+# ---------------------------------------------------------------------------
+
+
+def test_voicing_threshold_catches_partial_onset():
+    """Voicing onset at autocorr ≈ 0.39 must be detected at threshold 0.35.
+
+    Signal: sine (amplitude 1.0) + noise (amplitude 0.5) starts at 0.09 s.
+    Fully-voiced frame autocorr ≈ (0.5 × 0.58) / (0.5 + 0.25) ≈ 0.39
+      threshold 0.35: detects at the first fully-voiced frame → VOT ≈ 70 ms
+      threshold 0.50: 0.39 < 0.5 → NEVER detected → vot = None
+
+    Fails with current threshold 0.5 (vot = None).
+    Fix: change `> 0.5` to `> 0.35` in pipeline/vot.py autocorr check.
+    """
+    import numpy as np
+    from accent_coach.models import PhonemeInstance
+    from accent_coach.pipeline.vot import extract_vot
+
+    _SR = 16_000
+    n = int(0.35 * _SR)
+    rng = np.random.default_rng(9)
+
+    audio = np.zeros(n, dtype=np.float32)
+
+    # Clear burst at 0.02 s
+    b_s = int(0.02 * _SR)
+    audio[b_s: b_s + int(0.005 * _SR)] += (
+        rng.standard_normal(int(0.005 * _SR)) * 0.6
+    ).astype(np.float32)
+
+    # Partial voicing onset at 0.09 s: sine + moderate noise → autocorr ≈ 0.39
+    v_s = int(0.09 * _SR)
+    t_v = np.arange(n - v_s, dtype=np.float64) / _SR
+    audio[v_s:] += (
+        np.sin(2 * np.pi * 120 * t_v)
+        + 0.5 * rng.standard_normal(n - v_s)
+    ).astype(np.float32)
+
+    stop = PhonemeInstance(
+        phoneme="p", arpabet="P", start_time=0.02, end_time=0.07,
+        sentence_id=1, word="pop", is_stressed=True,
+    )
+    vot = extract_vot(audio, _SR, stop)
+    assert vot is not None and 40 < vot < 110, (
+        f"vot={vot} — voicing onset at autocorr ≈ 0.39 must give VOT 40-110 ms. "
+        "Threshold 0.5 never detects this onset (0.39 < 0.5) → vot = None. "
+        "Fix: lower autocorr gate from 0.5 to 0.35 in pipeline/vot.py."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section 13 — §3A: minimum-F3 sampling for rhotics
+# ---------------------------------------------------------------------------
+
+
+def test_rhotic_min_f3_finds_constriction_trough():
+    """/r/ segment with F3 trough in first half must score ≥ 70.
+
+    Construct /r/ where the first half has F3=1950 Hz (English /r/ constriction)
+    and the second half has F3=2800 Hz (F3 has risen as the following vowel begins).
+    With midpoint-only sampling the formant tracker is near the transition region
+    and may measure F3 ≈ 2400–2600 Hz → score ≈ 30–50.
+    With multi-point minimum (25/33/50/67 % of segment), it finds the 1950 Hz
+    trough → score ≥ 70.
+
+    Fails as long as score_rhotic uses only the segment midpoint for F3.
+    """
+    from accent_coach.comparison.consonants.liquids import score_rhotic
+
+    half = 0.08  # 80 ms each half
+    seg_r = _resonator([(500, 80), (1200, 120), (1950, 150), (3400, 200)], dur=half)
+    seg_v = _resonator([(500, 80), (1500, 120), (2800, 200), (3600, 250)], dur=half)
+    seg = np.concatenate([seg_r, seg_v]).astype(np.float32)
+    audio = _place(seg, 0.02)
+    ph = _ph("r", "R", start=0.02, end=0.02 + 2 * half)
+    score = score_rhotic(audio, SR, ph)
+    assert score >= 70, (
+        f"score={score:.1f} — /r/ with F3 trough at 1950 Hz (first half) must score ≥ 70. "
+        "Midpoint-only sampling can land in the F3-rising second half. "
+        "Fix: sample at 25/33/50/67 % and return the minimum F3 for scoring."
+    )

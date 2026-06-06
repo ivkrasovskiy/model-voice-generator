@@ -12,6 +12,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from scipy.signal import butter, sosfilt
 
 from accent_coach.models import PhonemeInstance, SentenceAnalysis
 from accent_coach.reference.genam_norms import (
@@ -30,24 +31,31 @@ _FRICATIVES: frozenset[str] = frozenset(RP_FRICATIVE_COG_HZ)
 # /HH/ (aspiration) skipped — not a true fricative CoG signal (spec 3A)
 _SKIP = frozenset({"h", "hh"})
 
-# High-pass cutoff for CoG: removes voicing fundamental, F1, and F2 contamination
-# that bleeds in from adjacent vowels (especially with inaccurate G2P timestamps).
-# Jongman 2000 measured in clean lab conditions; conversational speech has ~500-1000 Hz
-# lower raw CoG due to low-frequency energy pollution. Zeroing sub-2kHz bins brings
-# measurements back in range of the published citation-form references.
+# Butterworth HP cutoff: removes voicing fundamental, F1, and F2 contamination
+# from adjacent vowels.  A 4th-order Butterworth gives a gradual rolloff that
+# preserves the left shoulder of broad-spectrum fricatives (/θ ð f v/), unlike
+# the former brick-wall bin-mask that over-suppressed those phonemes.
+# Matches the approximate HP conditioning used in Jongman et al. (2000).
 _COG_HP_HZ: float = 2000.0
 
 
 def _spectral_centroid(audio: np.ndarray, sr: int, p: PhonemeInstance) -> float | None:
-    """Spectral centre of gravity (CoG) for phoneme segment using power spectrum."""
+    """Spectral centre of gravity (CoG) using power spectrum with Butterworth HP.
+
+    Power spectrum per Jongman et al. (2000): spectrum = |FFT|².
+    4th-order Butterworth HP applied in time domain before FFT so that the
+    gradual rolloff does not abruptly zero energy near the cutoff frequency.
+    """
     start = max(0, int(p.start_time * sr))
     end = min(len(audio), int(p.end_time * sr))
     if end - start < 32:
         return None
     segment = audio[start:end].astype(np.float64)
-    spectrum = np.abs(np.fft.rfft(segment))
+    nyq = sr / 2.0
+    sos = butter(4, _COG_HP_HZ / nyq, btype="high", output="sos")
+    segment = sosfilt(sos, segment)
+    spectrum = np.abs(np.fft.rfft(segment)) ** 2
     freqs = np.fft.rfftfreq(len(segment), d=1.0 / sr)
-    spectrum = spectrum * (freqs >= _COG_HP_HZ)
     total = spectrum.sum()
     if total < 1e-12:
         return None

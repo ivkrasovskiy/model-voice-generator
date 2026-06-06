@@ -27,6 +27,7 @@ import parselmouth
 from accent_coach.models import PhonemeInstance, SentenceAnalysis
 from accent_coach.pipeline.alignment import IPA_VOWELS
 from accent_coach.reference.genam_norms import (
+    GA_LATERAL_CLEAR_F2_TARGET_HZ,
     GA_LATERAL_CLEAR_F2_THRESHOLD_HZ,
     GA_LATERAL_DARK_F2_TARGET_HZ,
     GA_LATERAL_F2_DECAY_HZ,
@@ -34,6 +35,7 @@ from accent_coach.reference.genam_norms import (
     GA_RHOTIC_F3_TARGET_HZ,
 )
 from accent_coach.reference.rp_norms import (
+    RP_LATERAL_CLEAR_F2_TARGET_HZ,
     RP_LATERAL_CLEAR_F2_THRESHOLD_HZ,
     RP_LATERAL_DARK_F2_TARGET_HZ,
     RP_LATERAL_F2_DECAY_HZ,
@@ -47,27 +49,30 @@ _MIN_SEGMENT_S: float = 0.020   # 20 ms minimum for reliable formant estimation
 # Ceiling: 5000 Hz for male (mean F0 <165 Hz), 5500 Hz for female — mirrors
 # the approach in pipeline/formants.py._estimate_max_formant().
 _MAX_FORMANTS: int = 5
-_MAX_FORMANT_MALE_HZ: float = 5000.0
+# Raised from 5000 to 5500 Hz: gives the Burg estimator headroom to place F4/F5
+# correctly and prevents spurious pole insertion that crowds out F3 in short windows.
+_MAX_FORMANT_MALE_HZ: float = 5500.0
 _MAX_FORMANT_FEMALE_HZ: float = 5500.0
 _WINDOW_LENGTH_S: float = 0.025
 _MALE_F0_THRESHOLD_HZ: float = 165.0  # F0 below this → male ceiling
 
 
-def _formant_at_midpoint(
+def _formant_at(
     audio: np.ndarray,
     sr: int,
     p: PhonemeInstance,
     formant_n: int,
+    time_fracs: list[float],
     mean_f0: float = 120.0,
 ) -> float | None:
-    """Measure Fn at phoneme midpoint using parselmouth Burg LPC.
+    """Measure Fn at one or more fractional positions within phoneme p.
 
-    Uses the full-signal formant object to exploit surrounding context (Praat
-    documentation recommends tracking on the full signal rather than
-    per-segment to avoid edge artefacts at short windows).
+    Returns the MINIMUM across all sampled time points so that /r/ scoring
+    uses the F3 constriction trough rather than an accidentally high midpoint
+    value (§3A: guards against midpoint landing in the adjacent rising vowel).
 
-    mean_f0 selects male (≤165 Hz) or female (>165 Hz) Burg ceiling so that
-    Praat does not mistake upper harmonics for F3/F4.
+    Uses the full-signal formant object (Praat recommendation: avoid edge
+    artefacts from per-segment analysis).  mean_f0 selects the Burg ceiling.
     """
     dur = p.end_time - p.start_time
     if dur < _MIN_SEGMENT_S:
@@ -82,11 +87,15 @@ def _formant_at_midpoint(
         window_length=_WINDOW_LENGTH_S,
         pre_emphasis_from=50.0,
     )
-    mid = (p.start_time + p.end_time) / 2
-    value = formant.get_value_at_time(formant_n, mid)
-    if value is None or (isinstance(value, float) and math.isnan(value)):
+    values: list[float] = []
+    for frac in time_fracs:
+        t = p.start_time + frac * dur
+        v = formant.get_value_at_time(formant_n, t)
+        if v is not None and not (isinstance(v, float) and math.isnan(v)):
+            values.append(float(v))
+    if not values:
         return None
-    return float(value)
+    return min(values)
 
 
 def score_rhotic(
@@ -108,7 +117,8 @@ def score_rhotic(
         target_hz = RP_RHOTIC_F3_TARGET_HZ
         decay = RP_RHOTIC_F3_DECAY_HZ
 
-    f3 = _formant_at_midpoint(audio, sr, phoneme, formant_n=3)
+    f3 = _formant_at(audio, sr, phoneme, formant_n=3,
+                     time_fracs=[0.25, 0.33, 0.50, 0.67])
     if f3 is None:
         return 50.0
 
@@ -143,14 +153,18 @@ def score_lateral(
         clear_threshold = RP_LATERAL_CLEAR_F2_THRESHOLD_HZ
         decay = RP_LATERAL_F2_DECAY_HZ
 
-    f2 = _formant_at_midpoint(audio, sr, phoneme, formant_n=2)
+    f2 = _formant_at(audio, sr, phoneme, formant_n=2, time_fracs=[0.50])
     if f2 is None:
         return 50.0
 
     if not syllable_final:
         # Initial position: clear /l/ is target — score based on F2 closeness
-        # to a typical clear /l/ (1500–1700 Hz); mild tolerance.
-        clear_target = 1550.0
+        # to accent-specific target; mild tolerance (2× decay).
+        clear_target = (
+            GA_LATERAL_CLEAR_F2_TARGET_HZ
+            if accent_target == "genam"
+            else RP_LATERAL_CLEAR_F2_TARGET_HZ
+        )
         delta = abs(f2 - clear_target)
         return float(min(100.0, 100.0 * math.exp(-delta / (decay * 2))))
 
@@ -190,9 +204,9 @@ def score_liquids(
     for p in user.phonemes:
         word_groups.setdefault(p.word, []).append(p)
 
-    # Build sorted word phoneme lists for position inference
-    word_phoneme_order: dict[str, list[str]] = {
-        w: [p.phoneme for p in sorted(ps, key=lambda x: x.start_time)]
+    # Sorted PhonemeInstance lists per word (used to find coda-cluster /l/ position).
+    word_sorted_instances: dict[str, list[PhonemeInstance]] = {
+        w: sorted(ps, key=lambda x: x.start_time)
         for w, ps in word_groups.items()
     }
 
@@ -225,9 +239,21 @@ def score_liquids(
                 rhotic_errors.append(p.word)
 
         elif ph == "l":
-            # Heuristic for syllable-final: is this /l/ the last phoneme in the word?
-            word_phones = word_phoneme_order.get(p.word, [])
-            is_final = bool(word_phones) and word_phones[-1] == "l"
+            # /l/ is syllable-final when it is the last phoneme in the word, OR
+            # when the next phoneme in the word is a consonant (coda cluster).
+            # Find this specific instance by start_time to avoid index('l') returning
+            # the wrong /l/ in words like "little" that contain two.
+            word_insts = word_sorted_instances.get(p.word, [])
+            l_idx = next(
+                (i for i, pi in enumerate(word_insts) if pi.start_time == p.start_time), -1
+            )
+            if l_idx < 0:
+                is_final = False
+            elif l_idx == len(word_insts) - 1:
+                is_final = True
+            else:
+                next_ph = word_insts[l_idx + 1].phoneme
+                is_final = next_ph not in IPA_VOWELS
             score = score_lateral(audio, sr, p, syllable_final=is_final, accent_target=accent_target)
             lateral_scores.append(score)
             if is_final and score < 55:
