@@ -7,6 +7,16 @@ from accent_coach.models import PhonemeInstance
 from accent_coach.reference.bath_words import BATH_WORDS as _BATH_WORDS
 from accent_coach.reference.bath_words import LOT_WORDS as _LOT_WORDS
 
+
+class AlignmentError(RuntimeError):
+    """Raised when acoustic alignment cannot produce real phoneme boundaries.
+
+    We deliberately do NOT fall back to a uniform word/n_phones split: uniform
+    boundaries are fabricated rhythm that silently corrupts every downstream
+    score (the consonant bench once ran entirely on uniform splits and ranked
+    the owner above natives without erroring).  Fail loudly instead.
+    """
+
 # ARPABET → IPA mapping (stress-aware for vowels that reduce in unstressed position).
 # Why stress digits matter: CMU dict uses AH0 for schwa and AH1/AH2 for STRUT (/ʌ/).
 # Stripping digits before mapping turns every "the/a/of" into /ʌ/ and contaminates scoring.
@@ -129,43 +139,105 @@ def _is_word_stressed(word: str, syllable_idx: int) -> bool:
     return syllable_idx == 0
 
 
-def _word_to_phoneme_instances(
-    word: str,
-    word_start: float,
-    word_end: float,
-    sentence_id: int,
-    accent_target: str = "rp",
-) -> list[PhonemeInstance]:
-    """Convert one word's time span into per-phoneme PhonemeInstance list."""
-    arpabet_seq = _g2p(word)
-    if not arpabet_seq:
+_CHAR_WORD_SEPARATORS = frozenset({" ", "|", ""})
+
+
+def _chars_to_ts(chars: list[dict] | None) -> list[tuple[float, float]]:
+    """Filter a list of WhisperX char dicts to usable (start, end) pairs.
+
+    Characters WhisperX could not place have ``start``/``end`` == None; drop
+    them.  Returns ``[]`` when no usable timing remains.
+    """
+    if not chars:
         return []
+    out: list[tuple[float, float]] = []
+    for c in chars:
+        cs, ce = c.get("start"), c.get("end")
+        if cs is None or ce is None or ce < cs:
+            continue
+        out.append((float(cs), float(ce)))
+    return out
 
-    word_key = re.sub(r"[^a-z']", "", word.lower())
-    is_bath = word_key in _BATH_WORDS
 
-    syl_indices = _syllable_index(arpabet_seq)
-    dur_per_ph = (word_end - word_start) / len(arpabet_seq)
+def _segment_char_groups(seg_chars: list[dict]) -> list[list[dict]]:
+    """Split a flat segment-level WhisperX char list into per-word groups.
+
+    This WhisperX build stores char alignments at the SEGMENT level
+    (``segments[].chars``) as one flat sequence for the whole utterance, with
+    word boundaries marked by space characters — NOT nested per word.  Splitting
+    on the separators recovers one char group per spoken word, in order.
+    """
+    groups: list[list[dict]] = []
+    cur: list[dict] = []
+    for c in seg_chars:
+        if c.get("char", "") in _CHAR_WORD_SEPARATORS:
+            if cur:
+                groups.append(cur)
+                cur = []
+            continue
+        cur.append(c)
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def _word_char_ts_by_index(seg: dict) -> list[list[tuple[float, float]]] | None:
+    """Per-word char timing groups for a segment, aligned to ``seg['words']`` order.
+
+    Handles both WhisperX shapes: per-word ``words[].chars`` (older) and flat
+    segment-level ``segments[].chars`` split on spaces (this build).  Returns
+    None when neither carries usable char timing (caller uses uniform split).
+    """
+    words = seg.get("words", [])
+    # Shape A: chars nested under each word.
+    if any(w.get("chars") for w in words):
+        return [_chars_to_ts(w.get("chars")) for w in words]
+    # Shape B: flat segment-level char list, split on spaces into word groups.
+    seg_chars = seg.get("chars")
+    if seg_chars:
+        groups = _segment_char_groups(seg_chars)
+        if len(groups) == len(words):
+            return [_chars_to_ts(g) for g in groups]
+    return None
+
+
+def _whisperx_result_to_instances(
+    result: dict, sentence_id: int, accent_target: str
+) -> list[PhonemeInstance]:
+    """Convert a WhisperX align() result into phoneme instances.
+
+    Pure function (no model) so it is unit-testable.  Uses acoustic char-level
+    boundaries ONLY (§2A).  There is no uniform fallback: a word with no usable
+    char timing is DROPPED, and if words exist but none yield char-based
+    instances the alignment is treated as failed (raises AlignmentError).
+    Uniform word/n_phones splits are fabricated rhythm that silently corrupt
+    every downstream score, so we refuse to emit them.
+    """
     instances: list[PhonemeInstance] = []
-    for i, (arpabet, syl_idx) in enumerate(zip(arpabet_seq, syl_indices, strict=True)):
-        # RP-specific phoneme overrides — gated on accent_target to avoid
-        # corrupting GenAm scoring (GenAm has no TRAP/BATH split, no /ɒ/).
-        if accent_target == "rp" and is_bath and arpabet in ("AE1", "AE2"):
-            ipa = "ɑː"
-        elif accent_target == "rp" and word_key in _LOT_WORDS and arpabet in ("AA1", "AA2"):
-            ipa = "ɒ"
-        else:
-            ipa = ARPABET_TO_IPA.get(arpabet, arpabet)
-        instances.append(
-            PhonemeInstance(
-                phoneme=ipa,
-                arpabet=arpabet,
-                start_time=word_start + i * dur_per_ph,
-                end_time=word_start + (i + 1) * dur_per_ph,
-                sentence_id=sentence_id,
-                word=word,
-                is_stressed=_is_word_stressed(word, syl_idx),
+    words_seen = 0
+    for seg in result.get("segments", []):
+        words = seg.get("words", [])
+        if not words:
+            continue
+        char_ts_by_word = _word_char_ts_by_index(seg)
+        for i, word_seg in enumerate(words):
+            word = word_seg.get("word", "").strip()
+            if not word:
+                continue
+            words_seen += 1
+            char_ts = char_ts_by_word[i] if char_ts_by_word else []
+            if not char_ts:
+                # No acoustic char timing for this word — drop it; never fabricate.
+                continue
+            instances.extend(
+                _char_timestamps_to_phoneme_instances(word, char_ts, sentence_id, accent_target)
             )
+
+    if words_seen and not instances:
+        raise AlignmentError(
+            "WhisperX returned words but no usable character timing "
+            "(return_char_alignments not honoured or unexpected 'chars' shape); "
+            "refusing to fabricate uniform phoneme boundaries."
         )
     return instances
 
@@ -173,10 +245,13 @@ def _word_to_phoneme_instances(
 def _whisperx_align(
     audio_path: Path, transcript: str, sentence_id: int, accent_target: str = "rp"
 ) -> list[PhonemeInstance]:
-    """WhisperX word-level alignment + cmudict G2P → phoneme instances.
+    """WhisperX word + char alignment + cmudict G2P → phoneme instances.
 
-    WhisperX gives accurate word timestamps; cmudict maps each word to its
-    ARPABET sequence; duration is split uniformly across phonemes within a word.
+    WhisperX gives accurate word AND character timestamps (with
+    ``return_char_alignments=True``); cmudict maps each word to its ARPABET
+    sequence; phoneme boundaries are interpolated over the acoustic character
+    timeline (§2A) rather than split uniformly.  Words with no usable char
+    timing fall back to the uniform split.
     """
     import whisperx  # type: ignore[import-untyped]
 
@@ -186,17 +261,9 @@ def _whisperx_align(
     # End time estimate based on 16 kHz samples (WhisperX loads at 16 kHz)
     approx_end = float(len(audio)) / 16000
     segments = [{"text": transcript, "start": 0.0, "end": approx_end}]
-    result = whisperx.align(segments, model, metadata, audio, device)
+    result = whisperx.align(segments, model, metadata, audio, device, return_char_alignments=True)
 
-    instances: list[PhonemeInstance] = []
-    for word_seg in result.get("word_segments", []):
-        word = word_seg.get("word", "").strip()
-        start = word_seg.get("start")
-        end = word_seg.get("end")
-        if start is None or end is None or end <= start:
-            continue
-        instances.extend(_word_to_phoneme_instances(word, start, end, sentence_id, accent_target))
-    return instances
+    return _whisperx_result_to_instances(result, sentence_id, accent_target)
 
 
 def _char_timestamps_to_phoneme_instances(
@@ -334,13 +401,22 @@ def _mms_align(
 def align_audio(
     audio_path: Path, transcript: str, sentence_id: int = 0, accent_target: str = "rp"
 ) -> list[PhonemeInstance]:
-    try:
-        instances = _whisperx_align(audio_path, transcript, sentence_id, accent_target)
+    errors: list[str] = []
+    for name, fn in (("whisperx", _whisperx_align), ("mms", _mms_align)):
+        try:
+            instances = fn(audio_path, transcript, sentence_id, accent_target)
+        except Exception as e:  # noqa: BLE001 — try the next real aligner, then raise
+            errors.append(f"{name}: {type(e).__name__}: {e}")
+            continue
         if instances:
             return instances
-    except Exception:  # noqa: BLE001 — intentional fallback to MMS
-        pass
-    return _mms_align(audio_path, transcript, sentence_id, accent_target)
+        errors.append(f"{name}: produced no phoneme instances")
+    # No silent empty/uniform result: a clip we cannot align must fail loudly so
+    # the caller drops it instead of scoring fabricated boundaries.
+    raise AlignmentError(
+        f"Alignment failed for {audio_path}: no aligner produced real boundaries. "
+        + " | ".join(errors)
+    )
 
 
 def filter_vowels(phonemes: list[PhonemeInstance]) -> list[PhonemeInstance]:

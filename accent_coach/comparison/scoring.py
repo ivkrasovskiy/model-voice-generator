@@ -67,8 +67,16 @@ def compare(
         "intonation":  intonation_bd.score,
     }
 
-    total_weight = sum(_WEIGHTS.values())
-    composite = sum(_WEIGHTS[k] * v for k, v in skill_scores.items()) / total_weight
+    # Redistribute weight over MEASURED skills only. A skill that returned None
+    # (could not be measured) must not contribute a fabricated value to the
+    # composite — the weight is shared among the skills that were actually scored.
+    measured = {k: v for k, v in skill_scores.items() if v is not None}
+    total_weight = sum(_WEIGHTS[k] for k in measured)
+    composite = (
+        sum(_WEIGHTS[k] * measured[k] for k in measured) / total_weight
+        if total_weight
+        else None
+    )
 
     diagnostics = build_vowel_diagnostics(user.vowels, reference_norms, target)
 

@@ -33,7 +33,6 @@ _WEIGHTS: dict[str, float] = {
     "laterals": 0.10,
 }
 
-_NEUTRAL_SCORE: float = 65.0  # returned when every sub-class is absent
 
 
 def score_consonants(
@@ -66,19 +65,23 @@ def score_consonants(
         "laterals": lateral_score,
     }
 
-    # Redistribute weights from absent sub-classes
+    # Redistribute weights from absent sub-classes. When NO sub-class is scorable
+    # the composite is None — never a fabricated neutral that would be averaged
+    # into group means as if it were a real measurement.
     available = {k: v for k, v in sub_scores.items() if v is not None}
     if not available:
-        composite = _NEUTRAL_SCORE
+        composite = None
     else:
         total_weight = sum(_WEIGHTS[k] for k in available)
-        composite = sum(_WEIGHTS[k] * available[k] for k in available) / total_weight
+        composite = float(
+            np.clip(sum(_WEIGHTS[k] * available[k] for k in available) / total_weight, 0.0, 100.0)
+        )
 
     # Collect and deduplicate diagnostics, most severe first
     all_diag = fric_diag + stop_diag + liq_diag
 
     return ConsonantScore(
-        score=float(np.clip(composite, 0.0, 100.0)),
+        score=composite,
         fricative_score=fric_score,
         stop_aspiration_score=stop_score,
         rhotic_score=rhotic_score,

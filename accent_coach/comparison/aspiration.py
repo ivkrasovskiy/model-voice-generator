@@ -15,7 +15,9 @@ def score_aspiration(
     target: SentenceAnalysis | None = None,
 ) -> AspirationBreakdown:
     if not user.stops:
-        return AspirationBreakdown(per_stop={}, score=50.0)
+        # No stops to measure — score None so the composite redistributes weight
+        # instead of averaging in a fabricated neutral.
+        return AspirationBreakdown(per_stop={}, score=None)
 
     per_stop: dict[str, float] = {}
     if target is not None:
@@ -40,5 +42,5 @@ def score_aspiration(
             z = abs(s.vot_ms - mean) / sd
             per_stop[p] = 100.0 * math.exp(-z / _DECAY)
 
-    score = float(np.mean(list(per_stop.values()))) if per_stop else 50.0
+    score = float(np.mean(list(per_stop.values()))) if per_stop else None
     return AspirationBreakdown(per_stop=per_stop, score=score)

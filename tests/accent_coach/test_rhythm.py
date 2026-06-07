@@ -54,16 +54,15 @@ def test_inverted_pattern_scores_low():
     assert score < 20.0, f"Inverted pattern score should be < 20, got {score:.1f}"
 
 
-def test_flat_durations_returns_50():
-    """If one speaker has all equal durations, correlation is undefined → neutral 50."""
+def test_flat_durations_returns_none():
+    """All-equal durations → correlation undefined → None (not a fabricated 50)."""
     user = [0.1] * 6
     target = [0.05, 0.3, 0.05, 0.3, 0.05, 0.3]
-    score = _syllable_pattern_score(user, target)
-    assert score == pytest.approx(50.0, abs=1.0)
+    assert _syllable_pattern_score(user, target) is None
 
 
-def test_short_sequence_returns_50():
-    assert _syllable_pattern_score([0.1, 0.2], [0.2, 0.3]) == pytest.approx(50.0)
+def test_short_sequence_returns_none():
+    assert _syllable_pattern_score([0.1, 0.2], [0.2, 0.3]) is None
 
 
 # ---------------------------------------------------------------------------
@@ -177,13 +176,13 @@ def test_diagnostics_mention_inflated_words():
 # Bug 1 fix: pattern correlation returns neutral when counts diverge > 30%
 # ---------------------------------------------------------------------------
 
-def test_pattern_score_neutral_on_large_count_mismatch():
-    """If user detects 5 syllables and target detects 9 (>30% diff), score is 50."""
+def test_pattern_score_none_on_large_count_mismatch():
+    """User 5 syllables vs target 9 (>30% diff) → None (not a fabricated neutral)."""
     user_durs = [0.1, 0.3, 0.05, 0.25, 0.08]         # 5 syllables
     target_durs = [0.025, 0.3, 0.05, 0.25, 0.08, 0.15, 0.2, 0.06, 0.18]  # 9 syllables
     score = _syllable_pattern_score(user_durs, target_durs)
-    assert score == pytest.approx(50.0), (
-        f"Count mismatch >30% should return 50 (neutral), got {score:.1f}"
+    assert score is None, (
+        f"Count mismatch >30% should return None (caller redistributes), got {score}"
     )
 
 

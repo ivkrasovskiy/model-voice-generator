@@ -130,7 +130,12 @@
       "Bash(python3 scripts/bench/accent_coach_consonant_bench.py --n 3 --group rp_fry,owner,genam_harris)",
       "Bash(python3 scripts/bench/accent_coach_consonant_bench.py --n 15 --group rp_fry,owner)",
       "Bash(python3 scripts/bench/accent_coach_consonant_bench.py --n 15 --accent genam --group genam_harris)",
-      "Bash([ -f \"/Users/ivkrasovskii/model-voice-generator/$p\" ])"
+      "Bash([ -f \"/Users/ivkrasovskii/model-voice-generator/$p\" ])",
+      "Bash([ -f \"tts_output/$f\" ])",
+      "Bash(cd /Users/ivkrasovskii/model-voice-generator; *)",
+      "Bash(rm -f /tmp/cons_bench.log)",
+      "Bash(echo \"launched pid $!\")",
+      "Bash(pkill -f \"consonant_bench\")"
     ],
     "additionalDirectories": [
       "/private/tmp",

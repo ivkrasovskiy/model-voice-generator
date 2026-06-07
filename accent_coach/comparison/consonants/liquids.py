@@ -103,12 +103,14 @@ def score_rhotic(
     sr: int,
     phoneme: PhonemeInstance,
     accent_target: str = "rp",
-) -> float:
+) -> float | None:
     """Score 0–100 for English /r/ quality based on F3 depression.
 
     100 = F3 at or below the English target (≤ ~2000 Hz).
     Score falls exponentially as F3 rises above the rhotic target.
-    Returns 50.0 (neutral) when F3 cannot be measured.
+    Returns None when F3 cannot be measured — the caller drops the token rather
+    than averaging in a fabricated neutral (a 50 here once inflated natives and
+    masked unmeasurable owner /r/, inverting the rhotic ordering).
     """
     if accent_target == "genam":
         target_hz = GA_RHOTIC_F3_TARGET_HZ
@@ -120,7 +122,7 @@ def score_rhotic(
     f3 = _formant_at(audio, sr, phoneme, formant_n=3,
                      time_fracs=[0.25, 0.33, 0.50, 0.67])
     if f3 is None:
-        return 50.0
+        return None
 
     # Score: perfect when F3 ≤ target; exponential penalty for F3 > target
     if f3 <= target_hz:
@@ -135,14 +137,15 @@ def score_lateral(
     phoneme: PhonemeInstance,
     syllable_final: bool,
     accent_target: str = "rp",
-) -> float:
+) -> float | None:
     """Score 0–100 for /l/ quality based on F2 in its syllable position.
 
     Syllable-final position: dark /l/ expected (F2 ~800–1300 Hz in RP).
       F2 above clear-/l/ threshold → penalty (missing velarisation).
     Syllable-initial position: clear /l/ is correct → F2 near clear target
       is fine; no penalty regardless of F2 value.
-    Returns 50.0 (neutral) when F2 cannot be measured.
+    Returns None when F2 cannot be measured — caller drops the token rather than
+    averaging in a fabricated neutral.
     """
     if accent_target == "genam":
         dark_target = GA_LATERAL_DARK_F2_TARGET_HZ
@@ -155,7 +158,7 @@ def score_lateral(
 
     f2 = _formant_at(audio, sr, phoneme, formant_n=2, time_fracs=[0.50])
     if f2 is None:
-        return 50.0
+        return None
 
     if not syllable_final:
         # Initial position: clear /l/ is target — score based on F2 closeness
@@ -233,6 +236,8 @@ def score_liquids(
             if accent_target == "rp" and next_ph_by_time.get(p.start_time) not in IPA_VOWELS:
                 continue
             score = score_rhotic(audio, sr, p, accent_target=accent_target)
+            if score is None:
+                continue  # F3 unmeasurable — drop, never average a neutral
             rhotic_scores.append(score)
             # Flag if F3 measured above non-native threshold
             if score < 50:
@@ -255,6 +260,8 @@ def score_liquids(
                 next_ph = word_insts[l_idx + 1].phoneme
                 is_final = next_ph not in IPA_VOWELS
             score = score_lateral(audio, sr, p, syllable_final=is_final, accent_target=accent_target)
+            if score is None:
+                continue  # F2 unmeasurable — drop, never average a neutral
             lateral_scores.append(score)
             if is_final and score < 55:
                 clear_l_errors.append(p.word)

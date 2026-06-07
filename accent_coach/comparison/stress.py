@@ -8,15 +8,19 @@ from accent_coach.models import SentenceAnalysis
 def score_stress(
     user: SentenceAnalysis,
     target: SentenceAnalysis | None = None,
-) -> float:
-    """Per-syllable stress position match, averaged over the sentence."""
+) -> float | None:
+    """Per-syllable stress position match, averaged over the sentence.
+
+    Returns None when there is no stress pattern to score — the caller
+    redistributes weight rather than averaging in a fabricated neutral.
+    """
     if not user.stress_pattern:
-        return 50.0
+        return None
 
     if target is not None and target.stress_pattern:
         n = min(len(user.stress_pattern), len(target.stress_pattern))
         if n == 0:
-            return 50.0
+            return None
         matches = sum(
             u == t for u, t in zip(user.stress_pattern[:n], target.stress_pattern[:n], strict=False)
         )

@@ -185,15 +185,73 @@ context.
 - **Smoke test** — run `vendor/index-tts/.venv/bin/python scripts/indextts_smoke_test.py`
   before and after any change touching IndexTTS-2 paths.
 - Run all three with `bash scripts/check_repo.sh` before declaring a stage done.
+- **No hardcoded values in logic.** Calibration constants, thresholds, decay
+  values, file paths, model revisions, and accent targets live in dedicated
+  config/reference modules (`accent_coach/reference/*.py`, env vars, or a settings
+  file) — **never as magic numbers inline** in pipeline/scoring/generation code.
+  Every constant carries a provenance comment (corpus + citation it came from).
+  A literal threshold buried in a scorer is a future silent-miscalibration bug.
+- **No silent compromises or fallbacks.** Code that cannot do its real job must
+  **raise an explicit, explainable exception** — never degrade to a fabricated/
+  neutral/uniform result and continue. Specifically banned: silent uniform/
+  evenly-spaced substitution for a measured value; returning a neutral score
+  (`50.0`, `65.0`, `0.0`, perfect `100`) when a measurement failed; `except:
+  pass` or `except Exception: return <default>` that swallows a real failure.
+  Exceptions must be **caught at a level that can handle them meaningfully**
+  (e.g. drop the clip and record why), not blanket-swallowed. `None` is allowed
+  ONLY when the contract is "no data → caller redistributes/skips" AND the caller
+  actually does so. The litmus test: *if this path runs, would the output look
+  valid while being meaningless?* If yes, raise instead.
 
 ## Accent coach quality rules
 
 - **TDD**: write failing tests before implementing any feature. Tests must fail for the right reason (missing feature, not import error) before implementation begins.
 - **Scoring sanity**: consonant and vowel quality scores must rank **native RP/GenAm speakers > TTS > owner**. A metric that grades the owner above natives is broken.
+- **Comparison over absolutes**: prefer *relative* scoring — the user's value vs. the **same measurement on the BC/native target through the identical pipeline** — over absolute reference thresholds. Shared measurement error (G2P boundary drift, LPC/CoG bias) cancels in the difference; absolute reference tables cannot separate groups that share that error. Absolute references are a weak cross-check, never the primary signal. When a target clip exists, comparison mode is the default. Do not "fix" a broken absolute score by re-tuning its constants — move it to comparison mode. (See [docs/consonant_scoring_audit.md](docs/consonant_scoring_audit.md): widening fricative decay to land natives in a "believable band" inverted owner from lowest to highest because every group shared the same alignment artefact.)
+- **Never tune thresholds — or tests — to a score *level***: calibrate decay/target constants from the native-corpus *distribution* and validate them by the **native−owner gap**, never by absolute level. It is forbidden to widen a tolerance so scores reach a target band, and equally forbidden to relax a test threshold to accommodate a tuned constant (tests pin behaviour; constants do not get to move the test). **Reject any constant change that shrinks the native−owner gap, even if it raises the absolute scores.** Every constant change must cite the measured native/owner distribution that justifies it.
+- **Tests defend top-level invariants, one per sub-score**: for N sub-scores there must be N business-logic tests asserting **owner is strictly lowest** (and `native > TTS > owner`) on that sub-score, plus a composite-ordering test. A change that inverts any ordering must fail CI. Per-item synthetic tests are necessary but not sufficient — they pass in isolation and cannot catch a bench-level ordering inversion. Invariant tests run on the real corpus and `skip` (not pass) when the audio is absent.
 - **Dual-accent coverage**: every scoring module must handle both modern RP (Fry/Lindsey norms) and General American (Hillenbrand/modern corpus norms) via `accent_target` parameter.
 - **Reuse first**: before writing a new module, check if `accent_coach/pipeline/`, `accent_coach/comparison/`, or `accent_coach/reference/` already implements the needed primitive. Wrap or extend; do not duplicate.
 - **No speed-quality trade-off**: prefer acoustic accuracy (parselmouth Burg LPC, proper bandpass filters) over cheap approximations. Compute time is not a constraint in scoring pipelines.
 - **Review gate**: after completing a tests batch and after completing a feature implementation, spawn a code-review agent to find critical mistakes before committing.
+
+## Lessons learned (failure post-mortems — read before touching scoring)
+
+These are real failures from this repo. Each cost a wrong conclusion we almost shipped.
+
+1. **Silent uniform alignment made the whole consonant bench meaningless.**
+   `align_audio` requested WhisperX char timestamps but the parser looked in the
+   wrong place (chars are stored at *segment* level, not per word). It silently
+   fell back to a uniform `word_dur/n_phonemes` split, so every stop/fricative/
+   liquid was measured on the wrong audio slice. Scores looked plausible; the
+   owner beat native speakers. **Lesson:** a silent fallback to fabricated data
+   is worse than a crash — it produces confident garbage. Verify a feature
+   *actually engaged* on real data (we proved char timing was non-uniform on a
+   real clip) before trusting its output. Now alignment raises `AlignmentError`
+   instead of fabricating boundaries.
+
+2. **Tuning a constant to a target score level inverted the ordering.**
+   Fricative decay was solved as `median_delta / ln(100/70)` to land natives at
+   ~70 — which widened tolerance until the owner's careful speech scored *highest*.
+   **Lesson:** calibrate from the distribution and validate by the native−owner
+   gap, never by absolute level; and never relax a test to fit a tuned constant.
+
+3. **Neutral fallbacks (`return 50.0`/`65.0`) silently corrupted aggregates.**
+   Unmeasurable /r/, /l/, or a consonant-less clip returned a confident neutral
+   that got averaged into group means as if measured, defeating the
+   None-redistribute design used elsewhere. **Lesson:** "couldn't measure" must
+   propagate as `None`/skip or raise — never as a number that looks real.
+
+4. **Absolute references reward register/material, not just accent.** Owner clips
+   are careful citation-form drills; native corpora are conversational. Absolute
+   CoG/F3 tables ranked the careful owner above natives. **Lesson:** control the
+   confound (comparison mode on the same transcript), don't trust absolute tables
+   across mismatched material.
+
+5. **Diagnostics must report discrimination, not just levels.** The bench's
+   level-only table hid an ordering inversion (everything rose into a "believable
+   band"). **Lesson:** report the native−owner gap + an inversion verdict so a
+   regression screams instead of looking like progress.
 
 ## Conventions
 

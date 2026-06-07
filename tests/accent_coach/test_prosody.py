@@ -6,6 +6,7 @@ import pytest
 
 from accent_coach.models import PhonemeInstance
 from accent_coach.pipeline.prosody import (
+    _syllable_durs_within_word,
     compute_npvi,
     extract_syllable_durations_acoustic,
     extract_syllable_durations_from_words,
@@ -103,29 +104,31 @@ def test_short_words_below_15ms_skipped():
 # Multi-syllable word: stress-weighted fallback (no detectable peaks in silence)
 # ---------------------------------------------------------------------------
 
-def test_two_syllable_word_stress_fallback_ratio():
-    """In silent audio, 2-syllable word uses 2:1 stress ratio."""
-    # "garden" — first syllable stressed (0.3s word)
-    ph_GAR = _phoneme("garden", "ɑː", 0.0, 0.15, is_stressed=True)   # stressed vowel
-    ph_DEN = _phoneme("garden", "ə",  0.15, 0.30, is_stressed=False)  # unstressed vowel
+def test_within_word_detection_returns_none_on_silence():
+    """Silent/undetectable word → None, NOT a fabricated stress-weighted split.
+
+    The old 2:1 stress-weighted fallback manufactured the long/short contrast
+    nPVI rewards. It is deleted: failed detection returns None so the caller
+    uses the real (measured) word duration instead of an invented split.
+    """
+    assert _syllable_durs_within_word(_silent_audio(0.30), sr=22050) is None
+
+
+def test_failed_within_word_uses_real_word_duration_not_split():
+    """When within-word detection fails, the word contributes its measured duration.
+
+    No fabricated per-syllable split is emitted for the word. (The sentence-level
+    < 2 path may still invoke the acoustic detector on the whole clip; here we
+    assert no 2:1-style fabricated contrast is injected for the word itself.)
+    """
+    ph_GAR = _phoneme("garden", "ɑː", 0.0, 0.15, is_stressed=True)
+    ph_DEN = _phoneme("garden", "ə",  0.15, 0.30, is_stressed=False)
     audio = _silent_audio(0.5)
     durs = extract_syllable_durations_from_words([ph_GAR, ph_DEN], audio, sr=22050)
-    # Should have 2 durations summing to ~0.3
-    assert len(durs) == 2
-    total = sum(durs)
-    assert total == pytest.approx(0.3, abs=0.01)
-    # Stressed syllable should be ~2× the unstressed one
-    assert durs[0] / durs[1] == pytest.approx(2.0, abs=0.1)
-
-
-def test_two_syllable_word_equal_stress_uniform():
-    """If both syllables are unstressed, distribution should be equal."""
-    ph1 = _phoneme("garden", "ɑː", 0.0, 0.15, is_stressed=False)
-    ph2 = _phoneme("garden", "ə",  0.15, 0.30, is_stressed=False)
-    audio = _silent_audio(0.5)
-    durs = extract_syllable_durations_from_words([ph1, ph2], audio, sr=22050)
-    assert len(durs) == 2
-    assert durs[0] == pytest.approx(durs[1], abs=0.01)
+    # No fabricated 2:1 split: if two durations come back they must NOT be the
+    # manufactured 0.20/0.10 stress ratio.
+    if len(durs) == 2:
+        assert durs[0] / max(durs[1], 1e-9) != pytest.approx(2.0, abs=0.1)
 
 
 # ---------------------------------------------------------------------------

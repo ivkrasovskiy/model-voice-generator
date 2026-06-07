@@ -17,6 +17,24 @@ from accent_coach.reference.rp_norms import (
     RP_VOWEL_F1_F2_MALE_MODERN,
 )
 
+import re as _re
+
+from accent_coach.pipeline.alignment import _char_timestamps_to_phoneme_instances
+
+
+def _word_phonemes(word, **kwargs):
+    """Word -> phoneme instances via the char-based path (equal char timing).
+
+    The uniform splitter _word_to_phoneme_instances was deleted (it fabricated
+    rhythm). Accent routing (BATH/LOT overrides) lives in the char path; these
+    routing tests only check phoneme identity, so equal char timing is fine.
+    """
+    chars = _re.sub(r"[^a-z\']", "", word.lower())
+    n = max(1, len(chars))
+    char_ts = [(i / n * 0.3, (i + 1) / n * 0.3) for i in range(n)]
+    accent = kwargs.get("accent_target") or kwargs.get("accent") or kwargs.get("dialect") or "rp"
+    return _char_timestamps_to_phoneme_instances(word, char_ts, 0, accent)
+
 
 # ---------------------------------------------------------------------------
 # RP norm table content
@@ -135,9 +153,9 @@ def test_word_to_phoneme_accepts_accent_target():
     of /æ/, adding ~130 Hz F2 error on every BATH word.
     Fix: add accent_target='rp'|'genam' and gate overrides on target == 'rp'.
     """
-    from accent_coach.pipeline.alignment import _word_to_phoneme_instances
+    from accent_coach.pipeline.alignment import _char_timestamps_to_phoneme_instances
 
-    sig = inspect.signature(_word_to_phoneme_instances)
+    sig = inspect.signature(_char_timestamps_to_phoneme_instances)
     has_target = any(n in sig.parameters for n in ("accent_target", "accent", "dialect"))
     assert has_target, (
         "_word_to_phoneme_instances() has no accent routing param. "
@@ -153,9 +171,9 @@ def test_bath_words_use_ae_for_genam_target():
     BUG: currently always emits /ɑː/ for BATH words regardless of target dialect.
     Fix: gate the BATH override on accent_target == 'rp'.
     """
-    from accent_coach.pipeline.alignment import IPA_VOWELS, _word_to_phoneme_instances
+    from accent_coach.pipeline.alignment import IPA_VOWELS, _char_timestamps_to_phoneme_instances  # noqa: F401
 
-    sig = inspect.signature(_word_to_phoneme_instances)
+    sig = inspect.signature(_char_timestamps_to_phoneme_instances)
     param = next((n for n in ("accent_target", "accent", "dialect") if n in sig.parameters), None)
     if param is None:
         pytest.fail(
@@ -163,7 +181,7 @@ def test_bath_words_use_ae_for_genam_target():
             "Cannot route BATH words to /æ/ for GenAm. Fix Bug 1."
         )
     for word in ("dance", "last", "class", "bath", "after", "path"):
-        instances = _word_to_phoneme_instances(word, 0.0, 0.3, sentence_id=0, **{param: "genam"})
+        instances = _word_phonemes(word, **{param: "genam"})
         vowels = [p.phoneme for p in instances if p.phoneme in IPA_VOWELS]
         assert "æ" in vowels, (
             f"'{word}' with GenAm target: expected /æ/, got {vowels}"
@@ -178,14 +196,14 @@ def test_bath_words_still_use_aː_for_rp_target():
 
     Regression guard: adding the GenAm path must not break the RP behaviour.
     """
-    from accent_coach.pipeline.alignment import IPA_VOWELS, _word_to_phoneme_instances
+    from accent_coach.pipeline.alignment import IPA_VOWELS, _char_timestamps_to_phoneme_instances  # noqa: F401
 
-    sig = inspect.signature(_word_to_phoneme_instances)
+    sig = inspect.signature(_char_timestamps_to_phoneme_instances)
     param = next((n for n in ("accent_target", "accent", "dialect") if n in sig.parameters), None)
     kwargs = {param: "rp"} if param else {}
 
     for word in ("dance", "last", "class", "bath"):
-        instances = _word_to_phoneme_instances(word, 0.0, 0.3, sentence_id=0, **kwargs)
+        instances = _word_phonemes(word, **kwargs)
         vowels = [p.phoneme for p in instances if p.phoneme in IPA_VOWELS]
         assert "ɑː" in vowels, f"'{word}' with RP target: expected /ɑː/, got {vowels}"
         assert "æ" not in vowels, f"'{word}' with RP target: /æ/ must not appear, got {vowels}"
@@ -198,9 +216,9 @@ def test_lot_words_use_aː_for_genam_target():
     BUG: currently always emits /ɒ/ for LOT words regardless of target dialect.
     Fix: gate the LOT override on accent_target == 'rp'.
     """
-    from accent_coach.pipeline.alignment import IPA_VOWELS, _word_to_phoneme_instances
+    from accent_coach.pipeline.alignment import IPA_VOWELS, _char_timestamps_to_phoneme_instances  # noqa: F401
 
-    sig = inspect.signature(_word_to_phoneme_instances)
+    sig = inspect.signature(_char_timestamps_to_phoneme_instances)
     param = next((n for n in ("accent_target", "accent", "dialect") if n in sig.parameters), None)
     if param is None:
         pytest.fail(
@@ -208,7 +226,7 @@ def test_lot_words_use_aː_for_genam_target():
             "Cannot route LOT words for GenAm. Fix Bug 1."
         )
     for word in ("lot", "not", "hot", "stop", "box"):
-        instances = _word_to_phoneme_instances(word, 0.0, 0.2, sentence_id=0, **{param: "genam"})
+        instances = _word_phonemes(word, **{param: "genam"})
         vowels = [p.phoneme for p in instances if p.phoneme in IPA_VOWELS]
         assert "ɒ" not in vowels, (
             f"'{word}' with GenAm target: /ɒ/ must not appear, got {vowels}"

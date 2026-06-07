@@ -53,19 +53,21 @@ def extract_syllable_durations_acoustic(audio: np.ndarray, sr: int) -> list[floa
 def _syllable_durs_within_word(
     word_audio: np.ndarray,
     sr: int,
-    n_syllables: int,
-    stressed_indices: list[int],
-) -> list[float]:
-    """Acoustic nucleus detection within one word slice; falls back to stress-weighted uniform.
+) -> list[float] | None:
+    """Acoustic nucleus detection within one word slice.
 
-    Only called for words with ≥ 2 syllables. Uses tighter parameters (50 ms min distance,
-    lower threshold) than the global detector to catch within-word contrasts.
+    Only called for words with ≥ 2 syllables. Uses tighter parameters (50 ms min
+    distance, lower threshold) than the global detector to catch within-word
+    contrasts.
+
+    Returns None when acoustic detection fails (too short, < 2 nuclei). We do NOT
+    fabricate a stress-weighted 2:1 split — that manufactures the exact long/short
+    contrast nPVI rewards, making a failed measurement look like good rhythm. The
+    caller falls back to the real word-level duration (coarser, but measured).
     """
     import librosa
     from scipy.ndimage import gaussian_filter1d
     from scipy.signal import butter, find_peaks, sosfilt
-
-    word_dur = len(word_audio) / sr
 
     if len(word_audio) >= int(0.040 * sr):
         nyq = sr / 2
@@ -83,11 +85,7 @@ def _syllable_durs_within_word(
             if durs:
                 return durs
 
-    # Stress-weighted fallback: stressed syllable gets 2× the duration of an unstressed one.
-    stressed_set = set(stressed_indices)
-    weights = [2.0 if i in stressed_set else 1.0 for i in range(n_syllables)]
-    total = sum(weights)
-    return [w * word_dur / total for w in weights]
+    return None
 
 
 def extract_syllable_durations_from_words(
@@ -135,17 +133,20 @@ def extract_syllable_durations_from_words(
             all_durs.append(word_dur)
             continue
 
-        # Multi-syllable: determine stressed positions and run per-word detector
-        stressed = [syl_pos for syl_pos, vi in enumerate(vowel_ph_indices) if phs[vi].is_stressed]
-
+        # Multi-syllable: run the per-word acoustic nucleus detector
         start_sample = int(word_start * sr)
         end_sample = int(min(word_end * sr, len(audio)))
         if start_sample >= end_sample:
             all_durs.append(word_dur)
             continue
 
-        durs = _syllable_durs_within_word(audio[start_sample:end_sample], sr, n_syl, stressed)
-        all_durs.extend(durs)
+        durs = _syllable_durs_within_word(audio[start_sample:end_sample], sr)
+        if durs is None:
+            # Detection failed — use the real word duration (measured), not a
+            # fabricated syllable split.
+            all_durs.append(word_dur)
+        else:
+            all_durs.extend(durs)
 
     if len(all_durs) < 2:
         return extract_syllable_durations_acoustic(audio, sr)

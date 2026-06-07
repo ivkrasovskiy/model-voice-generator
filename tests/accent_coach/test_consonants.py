@@ -467,10 +467,12 @@ def test_correct_fricatives_outscore_wrong_fricatives():
     )
 
 
-def test_no_consonants_returns_neutral_score():
-    """With no consonant phonemes in the sentence, score must be a neutral ConsonantScore.
+def test_no_consonants_returns_none_score():
+    """With no consonant phonemes, score must be None — never a fabricated neutral.
 
-    FAIL reason: current stub returns 70.0 float, not ConsonantScore.
+    A neutral 65 here was once averaged into bench group means as if measured,
+    able to invert orderings. "No tokens" must propagate as None so the caller
+    skips/redistributes (CLAUDE.md: no silent neutral fallbacks).
     """
     from accent_coach.comparison.consonants import score_consonants
 
@@ -478,8 +480,8 @@ def test_no_consonants_returns_neutral_score():
     user = _sentence([])
     result = score_consonants(user, audio, SR)
     assert hasattr(result, "score"), "score attribute missing on ConsonantScore"
-    assert 50 <= result.score <= 80, (
-        f"score={result.score:.1f} out of neutral range [50, 80] for empty consonant set."
+    assert result.score is None, (
+        f"score={result.score} — empty consonant set must yield None, not a neutral."
     )
 
 

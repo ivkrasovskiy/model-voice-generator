@@ -362,3 +362,204 @@ land in a believable band (target ~60–80 for correct productions), the orderin
 natives > TTS > owner holds on every sub-score, and no sub-score is uniformly
 near-zero. Composite ordering with owner lowest must be preserved throughout.
 ```
+
+---
+
+## Phase 0.22 implementation results  *(2026-06-06)*
+
+Steps 1–5 and 7–8 from the table above were implemented TDD (test → fail → fix → green).
+Step 6 (§2A char-aligned stop boundaries) remains open.
+
+### What was done
+
+| Step | Item | Files changed | Key change |
+|---|---|---|---|
+| 1 | §0 RP/GA provenance | `rp_norms.py` | Updated RP CoG table to match GA (both Jongman 2000 American English). Removed false "RP/SSBE adult male" citation. `RP_FRICATIVE_COG_HZ` is now identical to `GA_FRICATIVE_COG_HZ`. |
+| 2 | §4A coda-cluster /l/ | `liquids.py` | Replaced `word_phones[-1] == 'l'` with next-phoneme vowel check. Pre-consonant /l/ (milk, help, felt) is now correctly syllable-final. |
+| 3 | §4B accent-aware clear target | `liquids.py`, both norms | Added `RP_LATERAL_CLEAR_F2_TARGET_HZ = 1550`, `GA_LATERAL_CLEAR_F2_TARGET_HZ = 1500`. Initial-/l/ now branches on `accent_target`. |
+| 4 | §1A power spectrum | `fricatives.py` | `|FFT|` → `|FFT|²`. Matches Jongman 2000 measurement method. |
+| 4 | §1B Butterworth HP | `fricatives.py` | Replaced brick-wall bin mask with `scipy.signal.butter(4, 2000/nyq, 'high')` applied in time domain. Preserves left shoulder of /θ ð f v/. |
+| 5 | §1C decay re-fit | both norms | `RP_FRICATIVE_COG_DECAY_HZ` 2000 → **4000 Hz**, `GA_FRICATIVE_COG_DECAY_HZ` 2000 → **4500 Hz**. Data-fitted from native corpus median CoG delta (RP: 1408 Hz, GA: 1609 Hz). |
+| 7 | §2B VOT median window | `pipeline/vot.py` | `np.median(hf_energy)` → `np.median(search)`. Threshold now relative to the search window, not inflated by post-burst energy. |
+| 7 | §2C voicing threshold | `pipeline/vot.py` | Autocorr gate 0.5 → 0.35. Catches voicing onset in early aspirated frames. |
+| 8 | §3A min-F3 sampling | `liquids.py` | `_formant_at_midpoint` → `_formant_at(time_fracs)`. Rhotics sample at 25/33/50/67 % of segment and return the minimum F3 (constriction trough). Laterals keep midpoint only. |
+| 8 | §3B formant ceiling | `liquids.py` | `_MAX_FORMANT_MALE_HZ` 5000 → 5500 Hz. Prevents spurious Burg pole crowding out F3 in short windows. |
+
+8 new business-logic tests were added to `test_consonants_quality.py`, one per item above. All tests were written before the fix and confirmed to fail for the stated reason before implementation.
+
+### Bench results before and after (n=12 clips/group, seed=42, accent=rp)
+
+```
+Group              composite         fricative         stop_vot   rhotic  lateral
+                   before → after    before → after
+RP Fry               25 → 41           22 → 62          6 → 1.6     32→35    65→50
+RP Lindsey           28 → 54           31 → 74          3 → 0.6     32→58    65→59
+Real BC              28 → 38           22 → 64         23 → 2.9     33→46    61→50
+TTS BC               26 → 39           20 → 63          6 → 0.5     29→39    59→53
+Owner                20 → 48           19 → 74          3 → 0.5     23→55    45→44
+GA natives           35 → 44           27 → 66         10 → 1.8     71→84    52→50
+```
+
+### Decay re-fit data
+
+Measured from native corpus clips using the corrected measurement path
+(power spectrum + Butterworth HP), 15 clips per corpus:
+
+| Corpus | Tokens | Median delta (Hz) | Score at median (old decay=2000) | Fitted decay | Score at median (new decay) |
+|---|---|---|---|---|---|
+| RP Fry + Lindsey | 216 | 1408 | 49.5 | 4000 Hz | 70.0 |
+| GA Harris | 215 | 1609 | 44.7 | 4500 Hz | 70.0 |
+
+The large deltas (1400–1600 Hz) vs. Jongman citation-form references (7000 Hz for /s/ etc.)
+are primarily a **G2P timestamp alignment artefact**: uniform-split boundaries place the
+fricative segment partially inside the adjacent vowel, whose F2 energy lowers measured CoG.
+The Butterworth HP reduces but does not eliminate this contamination.
+
+### What the decay fix does and does not achieve
+
+**Does:** lifts native fricative scores from 22–31 range into the 62–74 range, meeting the
+audit's "believable 60–80 band" target.
+
+**Does not:** restore the `native > owner` ordering on fricatives. Measured data shows:
+
+| Group | Median CoG delta | Score at median (decay=4000) |
+|---|---|---|
+| RP Lindsey | 1050 Hz | 77 |
+| Owner | 1028 Hz | 77 |
+| RP Fry | 1803 Hz | 64 |
+| GA Harris | 1609 Hz | 67 |
+
+Owner and RP Lindsey have nearly identical delta distributions because both corpora consist of
+short, clean clips with similar G2P alignment error. No decay value creates a gap between
+them. Fricative ordering on absolute references is fundamentally limited until §2A
+(char-aligned boundaries) or §1D (comparison mode against BC target audio) is implemented.
+
+### Sub-score status after Phase 0.22
+
+| Sub-score | Status | Ordering | Notes |
+|---|---|---|---|
+| Fricative | Improved; in believable range | RP Lindsey ≈ Owner (tied) | Alignment artefact; needs §2A or §1D |
+| Stop VOT | Still near-zero (0.5–3 ms) | n/a | §2A (char-aligned boundaries) is the blocker |
+| Rhotic | GA: 84 ✓; RP: 35–58 | GA >> RP Lindsey > Owner > TTS > RP Fry | RP Fry low due to long clip alignment drift |
+| Lateral | Working | Owner = lowest (44) ✓ | §4A coda-cluster fix took effect |
+| Composite | Lifted | Ordering partially wrong | Driven by fricative + VOT issues above |
+
+### Remaining open items
+
+| Item | Blocking | Priority |
+|---|---|---|
+| §2A char-aligned stop boundaries | VOT scoring (currently zero), rhotic midpoint accuracy | High |
+| §1D comparison mode as bench default | Fricative native/owner ordering | High |
+| §3D log per-group rhotic token counts | Diagnostic visibility | Low |
+| §2D RMS-normalise VOT (only if 2A–2C insufficient) | VOT robustness | Deferred |
+| §3C rhotic constants (only if 3A+3B leave gap) | Rhotic calibration | Deferred |
+---
+
+## Phase 0.23 audit + structural corrections  *(2026-06-06)*
+
+A re-audit of the Phase 0.22 results found that the changes **improved absolute
+score levels while regressing the orderings that are the actual product**, and
+**violated the success criterion** "composite ordering with owner lowest must be
+preserved" (line 363): owner moved from clearly lowest composite (20) to
+second-highest (48).
+
+### Audit findings (against the bench numbers Phase 0.22 itself reports)
+
+| Sub-score | Phase 0.22 framing | Re-audit verdict |
+|---|---|---|
+| Fricative | "does not restore native>owner" | **Inverted** a previously-correct ordering: owner 19 (lowest) → 74 (tied highest). decay 2000→4000 was solved as `median_delta / ln(100/70)` — tuned to a score *level*, masking a shared G2P alignment artefact. |
+| Lateral | "§4A took effect" | **Degraded** the one working sub-score: native−owner gap 20 → ~6; RP Fry 65 → 50. Correct token *selection* (§4A) was not paired with re-validating the score on the newly-included cluster /l/. |
+| Stop VOT | "still near-zero" | **Killed a live signal**: Real BC 23.4 ms (the lone in-range value) → 2.9 ms. §2B/§2C detection tweaks were applied while §2A (boundaries) stayed open, so detection fires on spurious early frames. |
+| Rhotic | "GA 84 ✓" | Genuinely improved (min-F3 sampling), but still owner 55 > RP Fry 35 / TTS 39 — invariant violated for RP Fry. |
+
+**Root cause:** absolute references were calibrated against data dominated by a
+*shared* measurement artefact (uniform-split G2P boundaries), and validated by
+absolute *level* instead of the native−owner *gap*. When all groups carry the
+same error, widening tolerance to a "believable band" must compress the gap.
+
+### Corrections applied this phase
+
+| Area | Change | Principle it enforces |
+|---|---|---|
+| Governance | Added 3 rules to CLAUDE.md: **comparison over absolutes**, **never tune a constant/test to a score level** (reject any change that shrinks native−owner gap), **N invariant tests for N sub-scores**. | All future fixes |
+| Tests (keystone) | `tests/accent_coach/test_consonant_invariants.py` — corpus-driven, one owner-is-strictly-lowest test per sub-score + composite ordering + native>TTS>owner. Gated behind `RUN_CONSONANT_BENCH=1`; `skip` (never pass) when audio/flag absent. **Currently red-by-design** until measurement is fixed — that red is the documented state. | Tests defend top-level behaviour |
+| §2A (measurement) | `_whisperx_align` now requests `return_char_alignments=True` and routes char timings through `_char_timestamps_to_phoneme_instances` (pure parser `_whisperx_result_to_instances`, unit-tested). **Graceful fallback** to uniform split when char timing is absent → bounded blast radius. | Acoustic boundaries before any calibration |
+| §1D (comparison) | Bench `--target-manifest`: clips matched to a BC target of the **same phrase** (normalized transcript) are scored against it (`target_audio` through `score_consonants`), so the shared artefact cancels. Inert until paired BC audio exists. | Comparison over absolutes |
+| Decay revert | `RP/GA_FRICATIVE_COG_DECAY_HZ` 4000/4500 → **2000** (distribution-calibrated: ~1 Jongman SD = moderate penalty), de-coupled the `test_severely_wrong_s` threshold from the tuned value. | Never tune to a level |
+
+Fast suite: **205 passed, 10 skipped** (the invariant tests). `ruff check
+scripts/ accent_coach/` clean.
+
+### Heavy validation runbook (NOT run here — needs forced-alignment + generation)
+
+The structural code is in; turning the invariant harness green requires corpus
+runs that load WhisperX/MMS (and, for comparison mode, BC reference audio).
+
+1. **Re-measure with char-aligned boundaries (§2A):**
+   ```bash
+   uv run python scripts/bench/accent_coach_consonant_bench.py --n 12 --accent rp -v
+   RUN_CONSONANT_BENCH=1 CONSONANT_BENCH_N=12 \
+     uv run pytest tests/accent_coach/test_consonant_invariants.py -q
+   ```
+   Expect VOT to recover from near-zero (burst now inside the search window) and
+   RP rhotic drift to shrink. Read off the new native−owner gaps.
+
+2. **Build paired BC reference audio for comparison mode (§1D):** generate a BC
+   clip of each bench transcript, then:
+   ```bash
+   uv run python scripts/bench/accent_coach_consonant_bench.py \
+     --n 12 --target-manifest tts_output/<bc_paired>/manifest.json -v
+   ```
+   This is the lever expected to restore fricative native>owner (the absolute
+   path cannot, by the §0.22 analysis).
+
+3. **GREEN criterion:** `test_consonant_invariants.py` passes with
+   `RUN_CONSONANT_BENCH=1` — owner strictly lowest on every sub-score and on
+   composite. Only then is any constant re-touch considered, and only if it
+   *widens* the gap. **YELLOW:** owner lowest on composite + 3/4 sub-scores
+   (document the laggard). **RED:** any inversion persists → measurement, not
+   constants, is still the problem.
+
+### Phase 0.23 measured bench (char-aligned WhisperX + decay reverted to 2000)
+
+n=12/group, accent=rp, seed=42. Owner must be STRICTLY lowest; it is not.
+
+```
+Label          composite fricative stop_vot rhotic lateral
+rp_fry            31.6     40.8     1.6     35.0   50.0
+rp_lindsey        43.6     57.0     0.6     58.4   58.8
+real_bc           30.4     44.1     2.9     45.5   50.4
+tts_bc            30.4     42.2     0.5     39.4   52.9
+owner             40.4     58.2     0.5     55.1   43.5
+genam_harris      36.8     46.8     1.8     83.6   49.9
+
+composite  owner 40.4 vs 30.4 (real_bc) = -10.0 ✗ INVERTED
+fricative  owner 58.2 vs 40.8 (rp_fry)  = -17.4 ✗ INVERTED
+rhotic     owner 55.1 vs 35.0 (rp_fry)  = -20.1 ✗ INVERTED
+lateral    owner 43.5 vs 49.9 (genam)   =  +6.4 ✓
+stop_vot   owner 0.5  vs 0.5  (tts)      =  +0.0 ✓ (degenerate; all ≈0)
+verdict: RED
+```
+
+**Finding — empirical proof that absolute scoring cannot rank these groups.**
+§2A (char-aligned boundaries) and the decay revert did NOT restore the ordering.
+Root cause is a **register/material confound** the absolute references reward, not
+a measurement bug: the owner corpus is careful citation-form drill sentences
+("tom took the train to the terminal"); the native corpora are conversational
+(Fry/Lindsey) and lecture (Harris). Absolute CoG/F3 reward clear careful
+articulation, so the owner's drilled /s/, /r/ land nearer the reference than a
+native's coarticulated conversational tokens. Compounded by owner clips being
+short with few tokens (ph≈21, 2–5 fricatives vs natives' 70–160 ph, 7–29
+fricatives), inflating clean-token means.
+
+The only sub-score that discriminated correctly (**lateral**, owner lowest) is
+position/allophone-sensitive (coda dark-/l/ velarisation) — careful reading does
+not fake it. Confirms: relative + structural metrics separate; raw absolute
+CoG/F3 do not.
+
+**Decisive next step:** comparison mode (§1D) controls register/material by
+scoring owner vs BC on the SAME transcript. Requires generating BC reference
+audio (IndexTTS-2) for the bench transcripts — the `--target-manifest` plumbing
+is already in place. stop_vot also remains non-functional (≈0 everywhere): still
+blocked on real acoustic stop boundaries despite §2A on words (burst search
+window vs char timing needs verification).

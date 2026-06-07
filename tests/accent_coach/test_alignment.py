@@ -1,12 +1,14 @@
 """Alignment tests use a pre-built phoneme list to avoid model downloads in CI."""
 from __future__ import annotations
 
+import re
+
 from accent_coach.models import PhonemeInstance
 from accent_coach.pipeline.alignment import (
-    IPA_VOWELS,
     _BATH_WORDS,
     _LOT_WORDS,
-    _word_to_phoneme_instances,
+    IPA_VOWELS,
+    _char_timestamps_to_phoneme_instances,
     filter_stops,
     filter_vowels,
 )
@@ -17,6 +19,19 @@ def _phoneme(p: str, t0: float, t1: float, stressed: bool = False) -> PhonemeIns
         phoneme=p, arpabet="XX", start_time=t0, end_time=t1,
         sentence_id=1, word="test", is_stressed=stressed,
     )
+
+
+def _word_phonemes(word: str, accent_target: str = "rp") -> list[PhonemeInstance]:
+    """Phoneme instances for a word via the char-based path (equal char timing).
+
+    The uniform splitter was deleted (it fabricated rhythm). These accent-override
+    tests only check phoneme IDENTITY, so equal-spaced char timing is fine — the
+    BATH/LOT/THOUGHT override logic lives in _char_timestamps_to_phoneme_instances.
+    """
+    chars = re.sub(r"[^a-z']", "", word.lower())
+    n = max(1, len(chars))
+    char_ts = [(i / n * 0.3, (i + 1) / n * 0.3) for i in range(n)]
+    return _char_timestamps_to_phoneme_instances(word, char_ts, 0, accent_target)
 
 
 def test_timestamps_monotonic():
@@ -74,7 +89,7 @@ def test_trap_word_not_in_bath_set():
 def test_bath_word_mapped_to_long_a():
     """'bath', 'path', 'last' etc. must produce ɑː, not æ."""
     for word in ("bath", "path", "last", "class", "dance", "after", "half"):
-        instances = _word_to_phoneme_instances(word, 0.0, 0.3, sentence_id=0)
+        instances = _word_phonemes(word)
         vowels = [p.phoneme for p in instances if p.phoneme in IPA_VOWELS]
         assert vowels, f"no vowels found for '{word}'"
         assert "ɑː" in vowels, (
@@ -88,7 +103,7 @@ def test_bath_word_mapped_to_long_a():
 def test_trap_word_mapped_to_short_a():
     """TRAP words ('cat', 'hat') must keep æ — not affected by BATH override."""
     for word in ("cat", "hat", "man", "bag"):
-        instances = _word_to_phoneme_instances(word, 0.0, 0.2, sentence_id=0)
+        instances = _word_phonemes(word)
         vowels = [p.phoneme for p in instances if p.phoneme in IPA_VOWELS]
         assert "æ" in vowels, f"'{word}' should have æ (TRAP); got {vowels}"
         assert "ɑː" not in vowels, f"'{word}' should NOT have ɑː; got {vowels}"
@@ -106,7 +121,7 @@ def test_lot_word_set_contains_expected():
 def test_lot_word_mapped_to_short_o():
     """LOT words ('lot', 'not', 'stop') must produce ɒ, not ɑː (PALM/START)."""
     for word in ("lot", "not", "hot", "stop", "box"):
-        instances = _word_to_phoneme_instances(word, 0.0, 0.2, sentence_id=0)
+        instances = _word_phonemes(word)
         vowels = [p.phoneme for p in instances if p.phoneme in IPA_VOWELS]
         assert vowels, f"no vowels for '{word}'"
         assert "ɒ" in vowels, f"'{word}' should have ɒ (LOT); got {vowels}"
@@ -117,7 +132,7 @@ def test_thought_word_keeps_long_o():
     Note: 'caught' uses AA1 in this cmudict (caught-cot merger) so excluded here.
     """
     for word in ("thought", "law", "saw", "taught"):
-        instances = _word_to_phoneme_instances(word, 0.0, 0.2, sentence_id=0)
+        instances = _word_phonemes(word)
         vowels = [p.phoneme for p in instances if p.phoneme in IPA_VOWELS]
         assert vowels, f"no vowels for '{word}'"
         assert "ɔː" in vowels, f"'{word}' should have ɔː (THOUGHT/AO1); got {vowels}"
@@ -249,4 +264,141 @@ def test_char_timestamps_bath_override_preserved():
     )
     assert "æ" not in vowels, (
         f"'bath' in RP must NOT produce æ; got {vowels}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section 4 — §2A: WhisperX char-level alignment routed into phoneme boundaries
+# ---------------------------------------------------------------------------
+
+
+def test_whisperx_result_uses_char_boundaries_when_present():
+    """When WhisperX returns per-char timings, phoneme boundaries follow them.
+
+    Synthetic align() result for 'stop' with strongly unequal char durations
+    (s,t short; o long; p short) under segments[].words[].chars. The phoneme
+    durations must reflect that (stdev > 0.08), not the uniform 0.10 s split.
+    No model is loaded — this exercises the pure parser only.
+    """
+    import statistics
+
+    from accent_coach.pipeline.alignment import _whisperx_result_to_instances
+
+    result = {
+        "segments": [
+            {
+                "words": [
+                    {
+                        "word": "stop",
+                        "start": 0.0,
+                        "end": 0.40,
+                        "chars": [
+                            {"char": "s", "start": 0.00, "end": 0.02},
+                            {"char": "t", "start": 0.02, "end": 0.04},
+                            {"char": "o", "start": 0.04, "end": 0.36},
+                            {"char": "p", "start": 0.36, "end": 0.40},
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+    instances = _whisperx_result_to_instances(result, sentence_id=1, accent_target="rp")
+    assert len(instances) == 4, f"Expected 4 phonemes for 'stop', got {len(instances)}"
+    durations = [inst.end_time - inst.start_time for inst in instances]
+    assert statistics.stdev(durations) > 0.08, (
+        f"duration stdev={statistics.stdev(durations):.3f}; char boundaries must "
+        "produce unequal phoneme durations, not the uniform 0.10 s split."
+    )
+
+
+def test_whisperx_result_raises_when_no_char_timing_at_all():
+    """No segment-level words with char timing → AlignmentError, never uniform.
+
+    The flat ``word_segments`` shape carries no char timing; we refuse to
+    fabricate a uniform split from it. With words present but unusable, the
+    parser must fail loudly (the archetype bug must surface, not degrade).
+    """
+    import pytest
+
+    from accent_coach.pipeline.alignment import AlignmentError, _whisperx_result_to_instances
+
+    # word_segments only (no segments[].words) → nothing char-based → empty, not raised
+    # (words_seen == 0). The dangerous case is words present but no char timing:
+    result = {
+        "segments": [
+            {"words": [{"word": "stop", "start": 0.0, "end": 0.40}]}  # no 'chars'
+        ]
+    }
+    with pytest.raises(AlignmentError):
+        _whisperx_result_to_instances(result, sentence_id=1, accent_target="rp")
+
+
+def test_whisperx_result_raises_when_all_chars_none():
+    """Chars present but all start/end None → no usable timing → AlignmentError."""
+    import pytest
+
+    from accent_coach.pipeline.alignment import AlignmentError, _whisperx_result_to_instances
+
+    result = {
+        "segments": [
+            {
+                "words": [
+                    {
+                        "word": "stop",
+                        "start": 0.0,
+                        "end": 0.40,
+                        "chars": [
+                            {"char": "s", "start": None, "end": None},
+                            {"char": "t", "start": None, "end": None},
+                            {"char": "o", "start": None, "end": None},
+                            {"char": "p", "start": None, "end": None},
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+    with pytest.raises(AlignmentError):
+        _whisperx_result_to_instances(result, sentence_id=1, accent_target="rp")
+
+
+def test_whisperx_segment_level_chars_split_into_words():
+    """This WhisperX build stores chars flat under segments[].chars, split by spaces.
+
+    The parser must split that flat list into per-word groups (on the space
+    char) and produce char-based (non-uniform) phoneme durations — not fall back
+    to uniform. Mirrors the real shape found on the corpus.
+    """
+    import statistics
+
+    from accent_coach.pipeline.alignment import _whisperx_result_to_instances
+
+    def ch(c, s, e):
+        return {"char": c, "start": s, "end": e, "score": 1.0}
+
+    result = {
+        "segments": [
+            {
+                "text": "the stop",
+                "words": [
+                    {"word": "the", "start": 0.0, "end": 0.20},
+                    {"word": "stop", "start": 0.21, "end": 0.61},
+                ],
+                # flat char list incl. the space separator, non-uniform durations
+                "chars": [
+                    ch("t", 0.00, 0.06), ch("h", 0.06, 0.12), ch("e", 0.12, 0.20),
+                    ch(" ", 0.20, 0.21),
+                    ch("s", 0.21, 0.23), ch("t", 0.23, 0.25),
+                    ch("o", 0.25, 0.57), ch("p", 0.57, 0.61),
+                ],
+            }
+        ]
+    }
+    instances = _whisperx_result_to_instances(result, sentence_id=1, accent_target="rp")
+    stop_durs = [p.end_time - p.start_time for p in instances if p.word == "stop"]
+    assert len(stop_durs) == 4, f"expected 4 phonemes for 'stop', got {len(stop_durs)}"
+    assert statistics.stdev(stop_durs) > 0.08, (
+        f"'stop' durations stdev={statistics.stdev(stop_durs):.3f}; segment-level "
+        "chars must be split per word and produce non-uniform durations, not uniform."
     )

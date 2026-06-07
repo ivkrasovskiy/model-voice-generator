@@ -27,23 +27,23 @@ FUNCTION_WORDS: frozenset[str] = frozenset({
 def _syllable_pattern_score(
     user_durs: list[float],
     target_durs: list[float],
-) -> float:
-    """Pearson r of mean-normalised duration vectors → 0–100.
+) -> float | None:
+    """Pearson r of mean-normalised duration vectors → 0–100, or None.
 
     Normalising by each speaker's own mean removes speech-rate differences —
     only the rhythmic pattern (which syllables are long vs short) is compared.
 
-    Returns 50.0 (neutral) when counts differ by > 30%: truncating to the
-    shorter vector would correlate different phonological positions (e.g. if
-    the user's detector misses a function word at the start, every subsequent
-    index is off by one).
+    Returns None (not a fabricated neutral) when the pattern cannot be compared:
+    fewer than 3 aligned syllables, counts differing by > 30% (truncating would
+    correlate different phonological positions), or zero variance. The caller
+    redistributes the pattern weight to the signals it could measure.
     """
     n = min(len(user_durs), len(target_durs))
     if n < 3:
-        return 50.0
+        return None
     longer = max(len(user_durs), len(target_durs))
     if (longer - n) / longer > 0.30:
-        return 50.0
+        return None
     u = np.array(user_durs[:n], dtype=float)
     t = np.array(target_durs[:n], dtype=float)
     u_mean, t_mean = u.mean(), t.mean()
@@ -52,7 +52,7 @@ def _syllable_pattern_score(
     if t_mean > 0:
         t = t / t_mean
     if np.std(u) < 1e-9 or np.std(t) < 1e-9:
-        return 50.0
+        return None
     corr = float(np.corrcoef(u, t)[0, 1])
     return float(np.clip((corr + 1) / 2 * 100, 0.0, 100.0))
 
@@ -144,14 +144,12 @@ def score_rhythm(
     delta = abs(user_npvi - ref_npvi)
     npvi_score = 100.0 * math.exp(-delta / _DECAY)
 
-    # Pattern correlation — only meaningful with a target
+    # Pattern correlation — only meaningful with a target; None when not computable.
     pattern_correlation: float | None = None
-    pattern_score = 50.0
     if target is not None:
         pattern_correlation = _syllable_pattern_score(
             user.syllable_durations, target.syllable_durations
         )
-        pattern_score = pattern_correlation
 
     # Function word inflation — requires phoneme data in both
     function_word_score: float | None = None
@@ -161,16 +159,18 @@ def score_rhythm(
             user.phonemes, target.phonemes
         )
 
-    # Composite weights.
-    # With target + phoneme data: 3-signal blend (40/40/20).
-    # With target but no phoneme data: FW analysis unavailable — redistribute its
-    #   weight to avoid inflating the composite with a fictional perfect score.
-    # Without target: nPVI alone (absolute mode).
+    # Composite: blend whichever signals were actually measurable, redistributing
+    # weight away from any that returned None (pattern needs a comparable target
+    # vector, FW needs matched function words). nPVI is always present. No signal
+    # contributes a fabricated neutral.
     if target is not None:
+        weighted = {"npvi": (npvi_score, 0.4)}
+        if pattern_correlation is not None:
+            weighted["pattern"] = (pattern_correlation, 0.4)
         if function_word_score is not None:
-            composite = 0.4 * npvi_score + 0.4 * pattern_score + 0.2 * function_word_score
-        else:
-            composite = 0.5 * npvi_score + 0.5 * pattern_score
+            weighted["fw"] = (function_word_score, 0.2)
+        tw = sum(w for _, w in weighted.values())
+        composite = sum(v * w for v, w in weighted.values()) / tw
     else:
         composite = npvi_score
 

@@ -118,6 +118,10 @@ GA_FRICATIVE_COG_HZ: dict[str, float] = {
     "v":  5000.0,   # Jongman 2000, Table 2
 }
 
+# Distribution-calibrated (≈1 Jongman SD costs a moderate penalty), NOT tuned to a
+# score level.  The earlier 4500 Hz value (median_delta / ln(100/70)) inverted the
+# native−owner gap by widening tolerance to mask a shared alignment artefact —
+# forbidden by CLAUDE.md.  Fix measurement (§2A/§1D), not decay. See the audit doc.
 GA_FRICATIVE_COG_DECAY_HZ: float = 2000.0
 GA_TH_S_SUBSTITUTION_THRESHOLD_HZ: float = 5500.0
 

@@ -68,7 +68,8 @@ class RhythmBreakdown(BaseModel):
 
 class AspirationBreakdown(BaseModel):
     per_stop: dict[str, float]
-    score: float
+    # None when no stops were measurable — caller redistributes weight.
+    score: float | None = None
 
 
 class IntonationBreakdown(BaseModel):
@@ -77,7 +78,9 @@ class IntonationBreakdown(BaseModel):
 
 
 class ConsonantScore(BaseModel):
-    score: float
+    # None when no consonant tokens were scorable — callers must skip/redistribute,
+    # never treat absence as a real (neutral) score.
+    score: float | None = None
     fricative_score: float | None = None
     stop_aspiration_score: float | None = None
     rhotic_score: float | None = None
@@ -86,8 +89,10 @@ class ConsonantScore(BaseModel):
 
 
 class ComparisonResult(BaseModel):
-    skill_scores: dict[str, float]
-    composite_score: float
+    # A skill value is None when it could not be measured; the composite
+    # redistributes weight over measured skills (composite None only if none were).
+    skill_scores: dict[str, float | None]
+    composite_score: float | None
     vowel_diagnostics: list[VowelDiagnostic]
     rhythm_breakdown: RhythmBreakdown
     aspiration_breakdown: AspirationBreakdown

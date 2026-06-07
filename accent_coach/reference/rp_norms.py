@@ -189,7 +189,16 @@ RP_FRICATIVE_COG_HZ: dict[str, float] = {
     "v":  5000.0,   # Jongman 2000, Table 2 (labiodental voiced)
 }
 
-# CoG decay constant (Hz) for exponential scoring: score = exp(-|cog - ref| / decay)
+# CoG decay constant (Hz) for exponential scoring: score = exp(-|cog - ref| / decay).
+# Set from the WITHIN-NATIVE spread so ~1 Jongman speaker SD (≈400–800 Hz) costs a
+# moderate penalty (~18–33 pts) — i.e. calibrated to the distribution, NOT to a
+# score level.  The earlier 4000 Hz value was solved as median_delta / ln(100/70)
+# to land natives at 70; that is the forbidden "tune to a believable band" move
+# (CLAUDE.md: never tune a constant to a level) and it INVERTED the native−owner
+# gap (owner went from lowest to highest) because the large median delta is a
+# shared G2P alignment artefact, not a real fricative error.  Low absolute native
+# scores are a measurement problem, fixed by char-aligned boundaries (§2A) and
+# comparison mode (§1D) — not by widening decay.  See docs/consonant_scoring_audit.md.
 RP_FRICATIVE_COG_DECAY_HZ: float = 2000.0
 
 # Threshold above which a /θ/ token sounds like /s/ substitution — TH-fronting marker
