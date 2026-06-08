@@ -86,33 +86,31 @@ def _resonator(formants: list[tuple[float, float]], dur: float = 0.15, f0: float
 
 
 def test_ideal_s_scores_at_least_85():
-    """An /s/ band-limited near 7000 Hz must score ≥ 85.
+    """An /s/ at the IN-DOMAIN native CoG (≈5200 Hz) must score ≥ 85.
 
-    CoG of bandpass noise centered at 7000 Hz lands within ~250 Hz of the
-    reference; at decay=2000 Hz that gives score ≥ 88.  Threshold 85 allows
-    for filter-edge effects without hiding real miscalibration.
-    Fails if: scoring is flat, or reference CoG is wildly wrong.
+    The reference is the native /s/ mean measured through this 16 kHz pipeline
+    (5200 Hz), NOT Jongman's 22 kHz-band 7000 Hz. A synthetic /s/ at 5200 lands
+    on the reference → ~100. Fails if scoring is flat or the reference is wrong.
     """
     from accent_coach.comparison.consonants.fricatives import score_fricatives
 
-    noise = _noise(center=7000, bw=1500, dur=0.15)
+    noise = _noise(center=5200, bw=1500, dur=0.15)
     audio = _place(noise, 0.02)
     ph = _ph("s", "S", start=0.02, end=0.17)
     score, _ = score_fricatives(_sentence([ph]), audio, SR)
     assert score is not None and score >= 85, (
-        f"Near-ideal /s/ (CoG ≈ 7000 Hz) scored {score:.1f}. Expected ≥ 85."
+        f"Near-ideal /s/ (CoG ≈ 5200 Hz = in-domain native) scored {score:.1f}. Expected ≥ 85."
     )
 
 
-def test_severely_wrong_s_scores_below_35():
-    """An /s/ realised like /ʃ/ (CoG≈3500 Hz, 3500 Hz below the 7000 ref) scores < 35.
+def test_sh_substitution_scores_below_55():
+    """An /s/ realised like /ʃ/ (CoG≈3500 Hz) must score clearly below a good /s/.
 
-    Uses a still-FRICATION signal (energy above the 3 kHz frication gate) but with
-    a badly wrong CoG — the realistic "wrong /s/" (an /s/→/ʃ/ shift), not a
-    sub-3 kHz buzz (which the frication gate correctly rejects as non-fricative).
-    At the distribution-calibrated decay (2000 Hz) a 3500 Hz error is 1.75
-    e-foldings → score ≈ 17, far below 35. Decay-robust.
-    Fails if: decay is widened toward a "believable band" until the scorer goes flat.
+    With the in-domain /s/ reference (5200 Hz, not 7000) the dynamic range is
+    compressed — /s/ now sits nearer the other fricatives — so an /s/→/ʃ/ shift
+    (~1600 Hz off, ~2 native SD) scores ~45, not <35. The invariant that matters
+    is discrimination: a substitution scores far below the ~100 of a correct /s/.
+    Still-frication signal (passes the HF gate), so it tests CoG, not the gate.
     """
     from accent_coach.comparison.consonants.fricatives import score_fricatives
 
@@ -120,22 +118,26 @@ def test_severely_wrong_s_scores_below_35():
     audio = _place(noise, 0.02)
     ph = _ph("s", "S", start=0.02, end=0.17)
     score, _ = score_fricatives(_sentence([ph]), audio, SR)
-    assert score is not None and score < 35, (
-        f"Severely wrong /s/ (CoG≈3500 Hz) scored {score:.1f}. Expected < 35."
+    assert score is not None and score < 55, (
+        f"/s/→/ʃ/ substitution (CoG≈3500 Hz) scored {score:.1f}. Expected < 55."
     )
 
 
-def test_fricative_score_gap_good_vs_bad_at_least_65():
-    """Score gap between ideal and severely wrong /s/ must be ≥ 65 pts."""
+def test_fricative_score_gap_good_vs_bad_at_least_45():
+    """Discrimination: ideal /s/ (5200) minus /ʃ/-substitution (3500) ≥ 45 pts.
+
+    Gap target lowered 65→45: the in-domain reference (5200, not 7000) compresses
+    the achievable range, but the metric must still strongly separate a correct
+    /s/ from a substitution. (Validate fine calibration on the bench gap, not here.)
+    """
     from accent_coach.comparison.consonants.fricatives import score_fricatives
 
     ph = _ph("s", "S", start=0.02, end=0.17)
-    good, _ = score_fricatives(_sentence([ph]), _place(_noise(7000, 1500), 0.02), SR)
-    # /ʃ/-like 3500 Hz mis-production: still frication (passes the HF gate), wrong CoG.
+    good, _ = score_fricatives(_sentence([ph]), _place(_noise(5200, 1500), 0.02), SR)
     bad, _ = score_fricatives(_sentence([ph]), _place(_noise(3500, 1500), 0.02), SR)
     assert good is not None and bad is not None
-    assert good - bad >= 65, (
-        f"Score gap: {good:.1f} − {bad:.1f} = {good - bad:.1f}. Expected ≥ 65 pts."
+    assert good - bad >= 45, (
+        f"Score gap: {good:.1f} − {bad:.1f} = {good - bad:.1f}. Expected ≥ 45 pts."
     )
 
 
@@ -297,7 +299,7 @@ def test_native_rp_composite_at_least_75():
     """
     from accent_coach.comparison.consonants import score_consonants
 
-    audio, phonemes = _composite_audio_and_phonemes(s_center=7000, r_f3=1950, l_f2=1050)
+    audio, phonemes = _composite_audio_and_phonemes(s_center=5200, r_f3=1950, l_f2=1050)
     stops = [_stop("p", 67.5)]
     result = score_consonants(_sentence(phonemes, stops), audio, SR)
     assert result.score >= 75, (
@@ -317,7 +319,7 @@ def test_slavic_l2_composite_at_most_50():
     from accent_coach.comparison.consonants import score_consonants
 
     # Slavic L2 errors: tapped /r/ (F3 high), clear /l/ in final, no aspiration
-    audio, phonemes = _composite_audio_and_phonemes(s_center=7000, r_f3=2700, l_f2=1700)
+    audio, phonemes = _composite_audio_and_phonemes(s_center=5200, r_f3=2700, l_f2=1700)
     stops = [_stop("p", 15.0)]
     result = score_consonants(_sentence(phonemes, stops), audio, SR)
     assert result.score <= 50, (
@@ -336,8 +338,8 @@ def test_native_rp_beats_slavic_l2_by_at_least_25():
     """
     from accent_coach.comparison.consonants import score_consonants
 
-    native_audio, ph = _composite_audio_and_phonemes(s_center=7000, r_f3=1950, l_f2=1050)
-    l2_audio, _ = _composite_audio_and_phonemes(s_center=7000, r_f3=2700, l_f2=1700)
+    native_audio, ph = _composite_audio_and_phonemes(s_center=5200, r_f3=1950, l_f2=1050)
+    l2_audio, _ = _composite_audio_and_phonemes(s_center=5200, r_f3=2700, l_f2=1700)
 
     native = score_consonants(_sentence(ph, [_stop("p", 67.5)]), native_audio, SR)
     l2 = score_consonants(_sentence(ph, [_stop("p", 15.0)]), l2_audio, SR)
@@ -437,31 +439,29 @@ def test_lateral_initial_clear_target_differs_by_accent():
 
 
 def test_power_spectrum_cog_matches_f_reference():
-    """/f/ bimodal signal whose power-spectrum CoG = 5500 Hz (reference) must score ≥ 95.
+    """/f/ bimodal signal whose power-spectrum CoG = the /f/ reference (4700 Hz) scores ≥ 95.
 
-    Signal: tone at 5000 Hz (amplitude 2) + tone at 7500 Hz (amplitude 1).
-      Magnitude CoG = (5000×2 + 7500×1) / 3 ≈ 5833 Hz → score ≈ 85
-      Power CoG    = (5000×4 + 7500×1) / 5  = 5500 Hz → score = 100
-
-    Both frequencies are well above the 2000 Hz HP cutoff so the HP method
-    (hard mask or Butterworth) does not affect the result — this test isolates
-    the magnitude-vs-power spectrum bug (§1A).
-    Fails with current magnitude spectrum (score ≈ 85 < 95).
+    Tones chosen so the POWER CoG lands on the in-domain /f/ reference (4700 Hz):
+      tone 4200 Hz (amplitude 2) + tone 6700 Hz (amplitude 1).
+      Power CoG     = (4200×4 + 6700×1) / 5  = 4700 Hz → score ≈ 100
+      Magnitude CoG = (4200×2 + 6700×1) / 3 ≈ 5033 Hz → score ≈ 85
+    Both above the 2 kHz HP and below the 7.6 kHz ceiling, so this isolates the
+    magnitude-vs-power spectrum bug (§1A). Fails with a magnitude spectrum.
     """
     from accent_coach.comparison.consonants.fricatives import score_fricatives
 
     n = int(0.15 * SR)
     t = np.arange(n, dtype=np.float64) / SR
-    # amplitude 2 at 5000 Hz + amplitude 1 at 7500 Hz
-    signal = (2.0 * np.sin(2 * np.pi * 5000 * t)
-              + 1.0 * np.sin(2 * np.pi * 7500 * t)).astype(np.float32)
+    # amplitude 2 at 4200 Hz + amplitude 1 at 6700 Hz → power CoG = 4700 (/f/ ref)
+    signal = (2.0 * np.sin(2 * np.pi * 4200 * t)
+              + 1.0 * np.sin(2 * np.pi * 6700 * t)).astype(np.float32)
     signal = signal / (np.abs(signal).max() + 1e-9) * 0.8
     audio = _place(signal, 0.02)
     ph = _ph("f", "F", start=0.02, end=0.17)
     score, _ = score_fricatives(_sentence([ph]), audio, SR)
     assert score is not None and score >= 95, (
-        f"/f/ bimodal signal (power CoG = 5500 Hz = reference) scored {score:.1f}. "
-        "Expected ≥ 95. Magnitude spectrum gives CoG ≈ 5833 Hz → score ≈ 85. "
+        f"/f/ bimodal signal (power CoG = 4700 Hz = reference) scored {score:.1f}. "
+        "Expected ≥ 95. Magnitude spectrum gives CoG ≈ 5033 Hz → score ≈ 85. "
         "Fix: spectrum = np.abs(np.fft.rfft(segment)) ** 2"
     )
 

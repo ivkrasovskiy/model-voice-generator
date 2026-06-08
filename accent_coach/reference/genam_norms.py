@@ -101,21 +101,21 @@ _GENAM_MALE_MODERN: dict[str, tuple[float, float]] = {
 
 
 # ---------------------------------------------------------------------------
-# GenAm fricative CoG norms — adult male connected speech
-# Jongman et al. (2000) Table 2 (American English male column).
-# GenAm and RP CoG values differ minimally for /s ʃ/; dentals and labio-
-# dentals are near-identical across dialects (place-of-articulation is the
-# primary determinant, not dialect).  Values below follow RP where identical.
+# GenAm fricative CoG norms — IN-DOMAIN native means (place-driven, accent-neutral).
+# Measured through THIS pipeline on native English speakers and pooled across
+# accents; identical to RP_FRICATIVE_COG_HZ. Jongman's 7000 Hz /s/ is a 22 kHz-band
+# figure, uncapturable in our 16 kHz analysis band — see rp_norms.py for the full
+# rationale, sample sizes, and the weak-fricative (θ/ð) gate-bias caveat.
 # ---------------------------------------------------------------------------
 GA_FRICATIVE_COG_HZ: dict[str, float] = {
-    "s":  7000.0,   # Jongman 2000, Table 2 (American English male)
-    "z":  6400.0,   # Jongman 2000, Table 2
-    "ʃ":  3700.0,   # Jongman 2000, Table 2 (postalveolar)
-    "ʒ":  3200.0,   # Jongman 2000, Table 2
-    "θ":  4500.0,   # Jongman 2000, Table 2 (same as RP; place-of-art driven)
-    "ð":  3800.0,   # Jongman 2000, Table 2
-    "f":  5500.0,   # Jongman 2000, Table 2 (labiodental)
-    "v":  5000.0,   # Jongman 2000, Table 2
+    "s":  5200.0,   # in-domain native mean, n=455
+    "z":  5300.0,   # in-domain native mean, n=331
+    "ʃ":  3970.0,   # in-domain native mean, n=41
+    "ʒ":  3480.0,   # in-domain, sparse n=4
+    "θ":  4500.0,   # conservative dental (gate-biased; sparse)
+    "ð":  4400.0,   # conservative dental (gate-biased high)
+    "f":  4700.0,   # in-domain native mean, n=23
+    "v":  4850.0,   # in-domain native mean, n=36
 }
 
 # Distribution-calibrated (≈1 Jongman SD costs a moderate penalty), NOT tuned to a
@@ -123,7 +123,9 @@ GA_FRICATIVE_COG_HZ: dict[str, float] = {
 # native−owner gap by widening tolerance to mask a shared alignment artefact —
 # forbidden by CLAUDE.md.  Fix measurement (§2A/§1D), not decay. See the audit doc.
 GA_FRICATIVE_COG_DECAY_HZ: float = 2000.0
-GA_TH_S_SUBSTITUTION_THRESHOLD_HZ: float = 5500.0
+# Between in-domain native dental (~4450) and /s/ (5200); lowered with the
+# in-domain /s/ reference (was 5500 when /s/=7000).
+GA_TH_S_SUBSTITUTION_THRESHOLD_HZ: float = 4900.0
 
 # ---------------------------------------------------------------------------
 # GenAm rhotic /r/ — F3 depression (same physics as RP; American English is

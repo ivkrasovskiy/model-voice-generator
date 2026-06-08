@@ -171,39 +171,49 @@ RP_PITCH_TEMPLATES: dict[str, list[float]] = {
 
 
 # ---------------------------------------------------------------------------
-# Fricative spectral centroid (CoG) reference — Jongman et al. (2000),
-# "Acoustic characteristics of English fricatives", JASA 108(3), 1252–1263,
-# Table 2 (American English male speakers, connected speech).
-# Fricative CoG is determined primarily by place of articulation, not dialect;
-# no equivalent large-scale RP corpus exists for these phonemes.  Declared
-# accent-neutral: RP_FRICATIVE_COG_HZ is identical to GA_FRICATIVE_COG_HZ.
+# Fricative spectral centroid (CoG) reference — IN-DOMAIN native means.
+# Measured through THIS pipeline (normalize_audio → align → power-spectrum CoG
+# with 2 kHz Butterworth HP + frication gate) on native English speakers:
+# RP = Fry + Lindsey + BBC + real BC; GA = Huberman + Harris + Sapolsky + vsauce.
+# Pooled across accents (fricative CoG is place-driven, not dialectal); RP and GA
+# tables are identical. See scripts/tools/measure_fricative_cog.py and
+# docs/prosody_consonant_upgrade.md.
+#
+# WHY NOT Jongman (2000): Jongman's /s/=7000 Hz was measured on ~22 kHz studio
+# recordings (frication to 11+ kHz). Our analysis band is 16 kHz (8 kHz Nyquist),
+# and the native corpora are 16 kHz at source, so /s z/ energy above 8 kHz is gone
+# → the 7000 Hz target is uncapturable and natives scored "too low". The in-domain
+# means are the only fair reference for the band we actually measure in.
+#
+# Sample sizes (pooled): s n=455, z n=331, ʃ n=41, v n=36, ð n=27, f n=23 are
+# solid; θ (n=1) and ʒ (n=4) are sparse. /θ ð/ are weak fricatives whose CoG the
+# frication gate biases high (it keeps only HF-rich tokens) — so the dental values
+# are conservative phonetic estimates, not raw measurements. See
+# docs/accent_coach_potential_improvements.md (weak-fricative gate bias).
 # ---------------------------------------------------------------------------
 RP_FRICATIVE_COG_HZ: dict[str, float] = {
-    "s":  7000.0,   # Jongman 2000, Table 2 (American English male)
-    "z":  6400.0,   # Jongman 2000, Table 2
-    "ʃ":  3700.0,   # Jongman 2000, Table 2 (postalveolar)
-    "ʒ":  3200.0,   # Jongman 2000, Table 2
-    "θ":  4500.0,   # Jongman 2000, Table 2 (dental, high variance ±2000 Hz)
-    "ð":  3800.0,   # Jongman 2000, Table 2 (dental voiced, high variance)
-    "f":  5500.0,   # Jongman 2000, Table 2 (labiodental, broadband)
-    "v":  5000.0,   # Jongman 2000, Table 2 (labiodental voiced)
+    "s":  5200.0,   # in-domain native mean, n=455 (Jongman 7000 @22 kHz)
+    "z":  5300.0,   # in-domain native mean, n=331
+    "ʃ":  3970.0,   # in-domain native mean, n=41 (≈ Jongman 3700 — not band-limited)
+    "ʒ":  3480.0,   # in-domain, sparse n=4 (voiced /ʃ/)
+    "θ":  4500.0,   # conservative dental (n=1; gate-biased) — see note above
+    "ð":  4400.0,   # conservative dental (gate-biased high; raw mean implausible)
+    "f":  4700.0,   # in-domain native mean, n=23 (labiodental, broadband)
+    "v":  4850.0,   # in-domain native mean, n=36 (labiodental voiced)
 }
 
 # CoG decay constant (Hz) for exponential scoring: score = exp(-|cog - ref| / decay).
-# Set from the WITHIN-NATIVE spread so ~1 Jongman speaker SD (≈400–800 Hz) costs a
-# moderate penalty (~18–33 pts) — i.e. calibrated to the distribution, NOT to a
-# score level.  The earlier 4000 Hz value was solved as median_delta / ln(100/70)
-# to land natives at 70; that is the forbidden "tune to a believable band" move
-# (CLAUDE.md: never tune a constant to a level) and it INVERTED the native−owner
-# gap (owner went from lowest to highest) because the large median delta is a
-# shared G2P alignment artefact, not a real fricative error.  Low absolute native
-# scores are a measurement problem, fixed by char-aligned boundaries (§2A) and
-# comparison mode (§1D) — not by widening decay.  See docs/consonant_scoring_audit.md.
+# Calibrated to the WITHIN-NATIVE spread (measured in-domain: /s/ SD≈770, /z/ SD≈675)
+# so ~1 native SD costs a moderate penalty (~30 pts), NOT tuned to a score level.
+# Forbidden to widen toward a "believable band" (CLAUDE.md: never tune to a level —
+# it once inverted the native−owner gap). See docs/consonant_scoring_audit.md.
 RP_FRICATIVE_COG_DECAY_HZ: float = 2000.0
 
-# Threshold above which a /θ/ token sounds like /s/ substitution — TH-fronting marker
-# Spec: if CoG > 5500 Hz for /θ/ → /s/ substitution → tongue-placement instruction
-RP_TH_S_SUBSTITUTION_THRESHOLD_HZ: float = 5500.0
+# Threshold above which a /θ ð/ token sounds like /s z/ substitution (TH-fronting).
+# Set between the in-domain native dental CoG (~4450) and /s/ (5200): a dental whose
+# CoG climbs toward /s/ is fronting. (Was 5500 when /s/=7000; lowered with the
+# in-domain /s/ reference.)
+RP_TH_S_SUBSTITUTION_THRESHOLD_HZ: float = 4900.0
 
 # ---------------------------------------------------------------------------
 # Rhotic /r/ — F3 depression norms (Ladefoged & Johnson 2011, "A Course in
