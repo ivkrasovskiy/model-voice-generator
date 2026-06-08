@@ -3,12 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import librosa
-import numpy as np
-import soundfile as sf
 
 from accent_coach.calibration.sentences import Sentence
 from accent_coach.models import SentenceAnalysis
 from accent_coach.pipeline.alignment import align_audio
+from accent_coach.pipeline.audio_io import load_standard_audio
 from accent_coach.pipeline.formants import extract_vowel_features
 from accent_coach.pipeline.prosody import (
     extract_pitch_contour,
@@ -23,10 +22,13 @@ def analyse_audio(
     transcript: str,
     sentence_meta: Sentence,
 ) -> SentenceAnalysis:
-    audio, sr = sf.read(str(audio_path), always_2d=False)
-    if audio.ndim == 2:
-        audio = audio.mean(axis=1)
-    audio = audio.astype(np.float32)
+    # Canonical normalization (mono + 16 kHz + common bandwidth cap) so every
+    # user/corpus recording is measured on identical footing — no source
+    # sample-rate/bandwidth confound. Fail loudly on an unreadable clip.
+    loaded = load_standard_audio(audio_path)
+    if loaded is None:
+        raise ValueError(f"Could not read audio for analysis: {audio_path}")
+    audio, sr = loaded
 
     phonemes = align_audio(audio_path, transcript, sentence_meta.id)
 

@@ -416,3 +416,30 @@ Do NOT widen the decay (already rejected — hides the inversion).
 Sources: Jongman, Wayland & Wong (2000) JASA 108(3):1252-1263; later sibilant
 studies downsample to 22050 Hz to stay Jongman-comparable; high-freq fricative
 refinements (PMC10540850); SR/anti-alias effects on fricatives (PMC7056453).
+
+### In-domain fricative reference — result (2026-06-08)
+
+Replaced Jongman (7000 Hz /s/) with native means measured through THIS pipeline
+(scripts/tools/measure_fricative_cog.py; pooled RP+GA natives): /s/=5200, /z/=5300,
+/ʃ/=3970, /ʒ/=3480, /f/=4700, /v/=4850, dentals 4400–4500 (gate-biased, conservative).
+
+Bench fricative score, before → after:
+
+| group | Jongman 7000 | in-domain 5200 |
+|---|---|---|
+| rp_fry (native) | 40.5 | **77.1** |
+| rp_lindsey | 80.5 | 80.5 |
+| real_bc | ~44 | 77.1 |
+| genam_harris | ~45 | 77.2 |
+| **owner** | **58.2 (highest)** | **78.2 (tied)** |
+
+Outcome: natives lifted ~40 → ~77 (band-limiting bias removed). **Composite is now
+owner-lowest ✓.** Fricative now shows all groups ≈ 77–80 — the owner sits WITH
+natives, not above. Residual −1.1 "inversion" (owner 78.2 vs real_bc 77.1) is within
+a 3-pt spread = noise.
+
+**Honest finding:** fricative CoG does NOT discriminate a Russian-L2 speaker from
+natives — Russian /s/ ≈ English /s/ in CoG (same place of articulation). The
+"owner strictly lowest on fricatives" invariant is therefore too strong for this
+L1; fricatives are not an accent discriminator here. Discrimination for this
+speaker lives in vowels, rhotics, laterals, and (once fixed) VOT.
