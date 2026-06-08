@@ -128,7 +128,8 @@ def _score_clip(
 
     try:
         stops = extract_stop_features(audio, sr, phonemes)
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 — record, don't silently drop the VOT sub-class
+        print(f"    [stop-extract err] {wav.name}: {type(e).__name__}: {e}", file=sys.stderr)
         stops = []
 
     sa = _build_sentence_analysis(audio, sr, phonemes, stops, sentence_id)

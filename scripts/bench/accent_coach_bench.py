@@ -100,8 +100,8 @@ def main() -> None:
     report_lines = [
         f"# Accent Coach Phase 0 Bench — {run_id}\n",
         f"Manifest: `{args.manifest}`\n\n",
-        "| Experiment | Composite | Vowels | Consonants | Aspiration | Rhythm | Stress | Intonation |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Experiment | Composite | Vowels | Consonants | Aspiration | Rhythm | Intonation |",
+        "|---|---|---|---|---|---|---|",
     ]
 
     all_results: dict[str, dict] = {}
@@ -117,7 +117,6 @@ def main() -> None:
             f"| {summary.get('consonants', 0):.1f} "
             f"| {summary.get('aspiration', 0):.1f} "
             f"| {summary.get('rhythm', 0):.1f} "
-            f"| {summary.get('stress', 0):.1f} "
             f"| {summary.get('intonation', 0):.1f} |"
         )
         report_lines.append(row_str)

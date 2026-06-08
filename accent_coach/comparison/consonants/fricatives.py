@@ -38,6 +38,13 @@ _SKIP = frozenset({"h", "hh"})
 # Matches the approximate HP conditioning used in Jongman et al. (2000).
 _COG_HP_HZ: float = 2000.0
 
+# Frication gate: a true fricative concentrates energy in the high band; a window
+# that mis-aligned onto the adjacent vowel/closure does not.  Require ≥ this
+# fraction of raw-segment energy above _FRICATION_HF_HZ, else the token is NOT
+# frication and is dropped (return None) instead of polluting the group mean.
+_FRICATION_HF_HZ: float = 3000.0
+_FRICATION_HF_MIN_RATIO: float = 0.20
+
 
 def _spectral_centroid(audio: np.ndarray, sr: int, p: PhonemeInstance) -> float | None:
     """Spectral centre of gravity (CoG) using power spectrum with Butterworth HP.
@@ -45,15 +52,29 @@ def _spectral_centroid(audio: np.ndarray, sr: int, p: PhonemeInstance) -> float 
     Power spectrum per Jongman et al. (2000): spectrum = |FFT|².
     4th-order Butterworth HP applied in time domain before FFT so that the
     gradual rolloff does not abruptly zero energy near the cutoff frequency.
+
+    Returns None when the segment is not frication (a mis-aligned vowel/closure):
+    we refuse to emit a CoG for a token that does not look like a fricative.
     """
     start = max(0, int(p.start_time * sr))
     end = min(len(audio), int(p.end_time * sr))
     if end - start < 32:
         return None
-    segment = audio[start:end].astype(np.float64)
+    raw = audio[start:end].astype(np.float64)
+
+    # Frication gate on the RAW segment (before HP): is most energy high-band?
+    raw_spec = np.abs(np.fft.rfft(raw)) ** 2
+    raw_freqs = np.fft.rfftfreq(len(raw), d=1.0 / sr)
+    raw_total = raw_spec.sum()
+    if raw_total < 1e-12:
+        return None
+    hf_ratio = float(raw_spec[raw_freqs >= _FRICATION_HF_HZ].sum() / raw_total)
+    if hf_ratio < _FRICATION_HF_MIN_RATIO:
+        return None  # not frication — likely a mis-aligned vowel/closure window
+
     nyq = sr / 2.0
     sos = butter(4, _COG_HP_HZ / nyq, btype="high", output="sos")
-    segment = sosfilt(sos, segment)
+    segment = sosfilt(sos, raw)
     spectrum = np.abs(np.fft.rfft(segment)) ** 2
     freqs = np.fft.rfftfreq(len(segment), d=1.0 / sr)
     total = spectrum.sum()

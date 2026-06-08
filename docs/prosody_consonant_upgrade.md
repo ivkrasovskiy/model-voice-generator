@@ -331,3 +331,88 @@ without hunting through source. Target: a single `accent_coach/config.py` (or
 | `RP_NPVI_MIN/MAX` | `reference/rp_norms.py:133` | 40, 62 | Hybrid-adjusted nPVI native range |
 | `RP_VOT_RANGE_MS` | `reference/rp_norms.py:99` | p,t,k ranges | English VOT reference ranges |
 | `RP_VOT_SD_MS` | `reference/rp_norms.py:112` | 10 ms each | VOT SD (estimated, not corpus-derived) |
+
+---
+
+## VOT extractor — critical bug diagnosis (2026-06-07)
+
+Symptom: VOT ≈ 0–3 ms for **every** speaker group (should be ~50–125 ms for
+aspirated English /p t k/). Persists with char-aligned boundaries → this is an
+**extractor-algorithm** problem, not only alignment. Findings code-traced AND
+reproduced numerically on synthetic /pa/, /ka/ and connected-speech tokens.
+Full detail + sources in [vot_bug_diagnosis.md](vot_bug_diagnosis.md).
+
+### Critical bugs (`accent_coach/pipeline/vot.py`)
+
+| line | bug | why VOT → ≈0 |
+|---|---|---|
+| 67 | voicing loop `range(burst_frame, …)` starts **inclusive**, first frame > threshold | periodicity at burst frame → `voice_frame == burst_frame` → VOT 0 |
+| 43-47,67-72 | 20 ms `_PRE_MS` + `start_time` jitter pulls the **preceding voiced sound** into the window (English /p t k/ are post-vocalic) | residual voicing read as onset at frame 0 (reproduced ac=0.58 → VOT 0) |
+| 62 vs 72 | VOT = `(i − burst_frame)·5 ms` — locked to 5 ms **hop grid**, hard 0 floor | no sub-frame resolution; same-frame = 0 |
+| 53-58 | burst = first frame HF > `3×median`, median over a 100 ms window **containing the vowel** | threshold crossed at the vowel → burst ≈ voicing |
+| 71 | voicing gate `autocorr > 0.35` **too low** (modal ~0.6–0.85) | formant ringing crosses 0.35 early → onset pulled to burst |
+| 38 | `min_lag` ≈ 1 ms (~1000 Hz) | formant-band periodicity fakes voicing (should constrain F0 75–400 Hz) |
+
+### Gaps vs validated methods (AutoVOT / Dr.VOT / Praat–Lisker&Abramson)
+- No **closure-first anchoring** (no "burst after silence"); baseline must come from the closure, not a vowel-straddling median.
+- Burst should be a **broadband energy transient/derivative**, not HF-energy-vs-median (fires on the vowel).
+- Voicing onset via **F0-constrained periodicity** (parselmouth `To Pitch (ac)`, 75/400) strictly **after** the burst, persisting ≥20 ms.
+- No **negative-VOT (prevoicing)** handling — code clamps `<0 → None`.
+- Greedy first-crossing (vs AutoVOT joint optimisation) yields the degenerate same-frame solution.
+
+### Recommended fix
+Rewrite around a validated method (the greedy fixes interact):
+- **Option A** AutoVOT/Dr.VOT (export stop windows from existing MMS alignment as TextGrids).
+- **Option B** correct parselmouth/Praat pipeline (no new deps): closure → broadband-derivative burst (sub-frame) → F0-constrained voicing onset strictly after burst, signed for prevoicing; `vot_ms = (voice_sample − burst_sample)/sr·1000`.
+
+Non-negotiables: (a) anchor burst to the closure→release transient, not an HF median that includes the vowel; (b) detect voicing strictly after the burst with an F0-constrained high-threshold periodicity test. Validate vs hand-measured tokens; expect native > TTS > owner, /p t k/ in 50–125 ms.
+
+---
+
+## Fricative inversion — root cause: audio-bandwidth confound (2026-06-07)
+
+Owner (L2) scores HIGHEST on fricatives, native RP lowest. Worked the
+data-correctness checklist; reproduced through the exact bench path.
+
+**Item 1 (alignment/transcripts):** transcripts verbatim; alignment imperfect for
+short fricatives but **symmetric across groups** → not the cause.
+**Item 2 (phoneme ID / like-for-like):** correct — each /x/ compared to ref for the
+same /x/; no cross-phoneme contamination.
+**Item 3 (audio properties): ROOT CAUSE, confirmed with measurements.**
+
+| group | source SR | energy ceiling | /s/ CoG @16k |
+|---|---|---|---|
+| rp_fry (native) | 16000 | 8000 Hz | 4013 ← lowest |
+| rp_lindsey | 16000 | 8000 Hz | 5339 |
+| real_bc | 16000 | 8000 Hz | 4590 |
+| genam_harris | 16000 | 8000 Hz | 4580 |
+| tts_bc | 22050 | 10717 Hz | 4687 |
+| **owner** | **44100** | **19536 Hz** | **5316** |
+| Jongman ref | (22 kHz src) | — | **7000** |
+
+Mechanism: Jongman /s/ ref = 7000 Hz (from ≥22 kHz recordings, /s/ to 11+ kHz).
+Native corpora are band-limited to 8 kHz **at source** (YouTube/lecture), so their
+measured /s/ CoG sits ~4000–5300 Hz — a bandwidth artefact, not articulation. The
+owner's 44.1 kHz /s/ keeps more in-band HF mass (CoG 5316 even after 16k
+downsample), so `100·exp(-|CoG−7000|/2000)` rewards owner over natives. The metric
+measures **source bandwidth, not accent**. F0/pitch irrelevant (HP@2 kHz + CoG is
+F0-invariant).
+
+**Item 4 (logic bug):** secondary — the 7000 Hz ref is uncapturable at 16 kHz
+(Nyquist 8 kHz); reference band ≠ analysis band.
+
+### Fix (priority order)
+1. **Bandwidth-equalise every clip** to a common ceiling all corpora actually
+   contain (≤8 kHz) before measuring CoG — bring owner/TTS DOWN to match natives
+   (cannot recover HF natives never had).
+2. **Re-derive the reference CoG in the same 0–8 kHz band** from the native corpus
+   itself (Jongman 7000 Hz is a 22 kHz-band figure → meaningless at 8 kHz).
+3. **Comparison mode** (`--target-manifest`) vs a bandwidth-matched BC target of the
+   same phrase cancels the artefact.
+4. Reject fricative tokens whose in-window HF(>3 kHz) energy ratio < ~0.2
+   (mis-aligned /s z/ that landed on a vowel/closure).
+Do NOT widen the decay (already rejected — hides the inversion).
+
+Sources: Jongman, Wayland & Wong (2000) JASA 108(3):1252-1263; later sibilant
+studies downsample to 22050 Hz to stay Jongman-comparable; high-freq fricative
+refinements (PMC10540850); SR/anti-alias effects on fricatives (PMC7056453).

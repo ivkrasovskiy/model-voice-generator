@@ -6,7 +6,6 @@ from accent_coach.comparison.aspiration import score_aspiration
 from accent_coach.comparison.consonants import score_consonants
 from accent_coach.comparison.intonation import score_intonation
 from accent_coach.comparison.rhythm import score_rhythm
-from accent_coach.comparison.stress import score_stress
 from accent_coach.comparison.vowels import score_vowels
 from accent_coach.diagnostics.advice import build_vowel_diagnostics
 from accent_coach.models import ComparisonResult, SentenceAnalysis
@@ -14,13 +13,14 @@ from accent_coach.reference.genam_norms import get_genam_norms
 from accent_coach.reference.normalize import LobanovParams
 from accent_coach.reference.rp_norms import get_rp_norms
 
-# Default skill weights from spec
+# Default skill weights from spec.
+# NOTE: 'stress' was removed — it was a word-position heuristic (not acoustic) that
+# confused the composite. Weight redistributes over the remaining measured skills.
 _WEIGHTS: dict[str, float] = {
     "vowels":      25.0,
     "consonants":  15.0,
     "aspiration":  15.0,
     "rhythm":      15.0,
-    "stress":      15.0,
     "intonation":  15.0,
 }
 
@@ -52,7 +52,6 @@ def compare(
     )
     aspiration_bd = score_aspiration(user, target=target)
     rhythm_bd = score_rhythm(user, target=target)
-    stress_score = score_stress(user, target=target)
     intonation_bd = score_intonation(user, target=target)
     consonant_bd = score_consonants(
         user, user_audio, user_sr, target=target, accent_target=accent_target
@@ -63,7 +62,6 @@ def compare(
         "consonants":  consonant_bd.score,
         "aspiration":  aspiration_bd.score,
         "rhythm":      rhythm_bd.score,
-        "stress":      stress_score,
         "intonation":  intonation_bd.score,
     }
 

@@ -105,23 +105,23 @@ def test_ideal_s_scores_at_least_85():
 
 
 def test_severely_wrong_s_scores_below_35():
-    """An /s/ at CoG≈2000 Hz (5000 Hz below reference) must score < 35.
+    """An /s/ realised like /ʃ/ (CoG≈3500 Hz, 3500 Hz below the 7000 ref) scores < 35.
 
-    Derived from the synthetic signal, NOT from any "natives must hit 70" target:
-    at the distribution-calibrated decay (2000 Hz, ~1 Jongman SD = moderate
-    penalty) a 5000 Hz error is 2.5 e-foldings → score ≈ 8, far below 35.
-    The threshold stays decay-robust (any defensible decay ≤ ~2500 keeps it < 35).
-    Fails if: decay is widened toward a "believable band" until the scorer goes
-    flat — exactly the regression this and the corpus invariant harness guard.
+    Uses a still-FRICATION signal (energy above the 3 kHz frication gate) but with
+    a badly wrong CoG — the realistic "wrong /s/" (an /s/→/ʃ/ shift), not a
+    sub-3 kHz buzz (which the frication gate correctly rejects as non-fricative).
+    At the distribution-calibrated decay (2000 Hz) a 3500 Hz error is 1.75
+    e-foldings → score ≈ 17, far below 35. Decay-robust.
+    Fails if: decay is widened toward a "believable band" until the scorer goes flat.
     """
     from accent_coach.comparison.consonants.fricatives import score_fricatives
 
-    noise = _noise(center=2000, bw=1500, dur=0.15)
+    noise = _noise(center=3500, bw=1500, dur=0.15)
     audio = _place(noise, 0.02)
     ph = _ph("s", "S", start=0.02, end=0.17)
     score, _ = score_fricatives(_sentence([ph]), audio, SR)
     assert score is not None and score < 35, (
-        f"Severely wrong /s/ (CoG≈2000 Hz) scored {score:.1f}. Expected < 35."
+        f"Severely wrong /s/ (CoG≈3500 Hz) scored {score:.1f}. Expected < 35."
     )
 
 
@@ -131,7 +131,8 @@ def test_fricative_score_gap_good_vs_bad_at_least_65():
 
     ph = _ph("s", "S", start=0.02, end=0.17)
     good, _ = score_fricatives(_sentence([ph]), _place(_noise(7000, 1500), 0.02), SR)
-    bad, _ = score_fricatives(_sentence([ph]), _place(_noise(2000, 1500), 0.02), SR)
+    # /ʃ/-like 3500 Hz mis-production: still frication (passes the HF gate), wrong CoG.
+    bad, _ = score_fricatives(_sentence([ph]), _place(_noise(3500, 1500), 0.02), SR)
     assert good is not None and bad is not None
     assert good - bad >= 65, (
         f"Score gap: {good:.1f} − {bad:.1f} = {good - bad:.1f}. Expected ≥ 65 pts."
@@ -463,6 +464,40 @@ def test_power_spectrum_cog_matches_f_reference():
         "Expected ≥ 95. Magnitude spectrum gives CoG ≈ 5833 Hz → score ≈ 85. "
         "Fix: spectrum = np.abs(np.fft.rfft(segment)) ** 2"
     )
+
+
+# ---------------------------------------------------------------------------
+# Section 9b — fricative token must be frication, not a mis-aligned vowel/closure
+# (data-cleaning: alignment sometimes lands an /s z/ window on the adjacent vowel)
+# ---------------------------------------------------------------------------
+
+
+def test_fricative_token_on_vowel_is_rejected():
+    """A fricative window that actually contains a VOWEL (low HF energy) must be
+    skipped, not scored — otherwise mis-aligned tokens pollute the group mean.
+
+    A vowel resonator (F1 500, F2 1500, F3 2500) has almost no energy above
+    3 kHz, so it is not frication and must be dropped (score None, no tokens).
+    """
+    from accent_coach.comparison.consonants.fricatives import score_fricatives
+
+    seg = _resonator([(500, 80), (1500, 120), (2500, 200)], dur=0.15)
+    audio = _place(seg, 0.02)
+    ph = _ph("s", "S", start=0.02, end=0.17)
+    score, _ = score_fricatives(_sentence([ph]), audio, SR)
+    assert score is None, (
+        f"Vowel mis-aligned as /s/ scored {score} — must be rejected (not frication)."
+    )
+
+
+def test_real_frication_is_accepted():
+    """A genuine /s/ (band-limited noise near 7 kHz) must still be scored."""
+    from accent_coach.comparison.consonants.fricatives import score_fricatives
+
+    audio = _place(_noise(center=7000, bw=1500, dur=0.15), 0.02)
+    ph = _ph("s", "S", start=0.02, end=0.17)
+    score, _ = score_fricatives(_sentence([ph]), audio, SR)
+    assert score is not None, "Real frication must be accepted, not rejected by the HF gate."
 
 
 # ---------------------------------------------------------------------------

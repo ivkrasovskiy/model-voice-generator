@@ -135,7 +135,8 @@
       "Bash(cd /Users/ivkrasovskii/model-voice-generator; *)",
       "Bash(rm -f /tmp/cons_bench.log)",
       "Bash(echo \"launched pid $!\")",
-      "Bash(pkill -f \"consonant_bench\")"
+      "Bash(pkill -f \"consonant_bench\")",
+      "Bash(cd /Users/ivkrasovskii/model-voice-generator; rm -f accent_coach/comparison/stress.py accent_coach/comparison/__pycache__/stress.cpython-311.pyc; echo \"deleted stress.py\"; echo \"=== accent_coach_bench header/columns near stress ===\"; rtk read scripts/bench/accent_coach_bench.py | sed -n '95,125p')"
     ],
     "additionalDirectories": [
       "/private/tmp",
@@ -149,7 +150,8 @@
       "/Users/ivkrasovskii/model-voice-generator/tests",
       "/Users/ivkrasovskii/model-voice-generator/tts_output/owner_cal_50",
       "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_16/dsp_bc_voice_ga",
-      "/Users/ivkrasovskii/model-voice-generator/scripts/lib"
+      "/Users/ivkrasovskii/model-voice-generator/scripts/lib",
+      "/Users/ivkrasovskii/model-voice-generator/accent_coach/comparison"
     ]
   }
 }
