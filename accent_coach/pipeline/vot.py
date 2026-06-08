@@ -1,17 +1,55 @@
+"""Voice Onset Time (VOT) extraction — Lisker & Abramson (1964) definition.
+
+VOT = time from the stop BURST release to the onset of voicing (quasi-periodicity).
+
+The previous greedy two-threshold heuristic collapsed to ~0 ms on connected
+speech: it anchored the burst on a high-frequency energy median that included the
+following vowel, and read the PRECEDING vowel's periodicity as the stop's voicing
+onset. This implementation follows validated methods (AutoVOT / Praat):
+
+  1. CLOSURE — find the low-energy minimum near the aligned boundary; its energy
+     is the baseline (NOT a vowel-straddling median).
+  2. BURST — first sharp energy rise out of the closure (a broadband transient),
+     searched only AFTER the closure minimum (so the preceding vowel is excluded).
+  3. VOICING ONSET — first F0-constrained voiced frame (parselmouth pitch, floor
+     75 / ceiling 400 Hz) STRICTLY AFTER the burst, persisting ≥ 20 ms. This is
+     what prevents the preceding vowel from being read as the onset.
+
+See docs/vot_bug_diagnosis.md.
+"""
 from __future__ import annotations
 
 import numpy as np
+import parselmouth
 from scipy.signal import butter, sosfilt
 
 from accent_coach.models import PhonemeInstance, StopFeatures
 from accent_coach.pipeline.alignment import filter_stops
 
-_PRE_MS = 20.0
-_POST_MS = 200.0    # extended: voicing onset can be 150+ ms after burst when G2P timestamps are off
-_BURST_SEARCH_MS = 100.0  # extended: G2P uniform-split timestamps can be 40-80 ms off from actual burst
+# Search window around the aligned stop boundary (char-aligned start_time ≈ closure
+# onset). Generous enough to contain closure → burst → aspiration → voicing.
+_PRE_MS = 40.0
+# Long enough to contain closure (≤110 ms) + an aspirated VOT (≤125 ms) + the
+# voicing-persistence check (≥20 ms) of the following vowel, plus pitch edge trim.
+_POST_MS = 300.0
+_HOP_MS = 2.0           # fine grid for burst/voicing localisation
+_FRAME_MS = 10.0
+# Closure must lie within this much of the boundary (before the following vowel).
+_CLOSURE_WINDOW_MS = 110.0
+# Burst = first frame this fraction of the dynamic range above the closure baseline.
+_BURST_RISE_FRAC = 0.15
+# Voicing onset must persist at least this long to count (rejects transient blips).
+_MIN_VOICE_MS = 20.0
+# Pitch (periodicity) range for a male/female voice — F0-constrained so aspiration
+# noise and formant-band ringing are NOT mistaken for voicing.
+_PITCH_FLOOR_HZ = 75.0
+_PITCH_CEIL_HZ = 400.0
+# Plausibility bounds (ms): outside this, treat as a detection failure (None).
+_VOT_MIN_MS = -150.0
+_VOT_MAX_MS = 200.0
+
 _HF_LO = 2000
-_HF_HI = 7500  # Why: must stay < nyquist (8000 Hz at SR=16kHz) to avoid scipy boundary error
-_HOP_MS = 5.0
+_HF_HI = 7500  # < Nyquist at 16 kHz
 
 
 def _bandpass_energy(audio: np.ndarray, sr: int, lo: int, hi: int) -> np.ndarray:
@@ -20,63 +58,82 @@ def _bandpass_energy(audio: np.ndarray, sr: int, lo: int, hi: int) -> np.ndarray
     filtered = sosfilt(sos, audio)
     hop = int(_HOP_MS / 1000 * sr)
     n_frames = max(1, len(filtered) // hop)
-    energy = np.array(
-        [np.sum(filtered[i * hop : (i + 1) * hop] ** 2) for i in range(n_frames)]
-    )
-    return energy
+    return np.array([np.sum(filtered[i * hop : (i + 1) * hop] ** 2) for i in range(n_frames)])
 
 
-def _autocorr_peak(frame: np.ndarray) -> float:
-    if len(frame) < 2:
-        return 0.0
-    corr = np.correlate(frame, frame, mode="full")
-    corr = corr[len(corr) // 2 :]
-    if corr[0] == 0:
-        return 0.0
-    corr /= corr[0]
-    # Look for first peak beyond lag ~2 ms (skip zero-lag peak)
-    min_lag = max(1, len(corr) // 20)
-    return float(np.max(corr[min_lag:]))
+def _frame_rms(x: np.ndarray, hop: int, win: int) -> np.ndarray:
+    n = max(1, (len(x) - win) // hop + 1)
+    return np.array([np.sqrt(np.mean(x[i * hop : i * hop + win] ** 2)) for i in range(n)])
 
 
 def extract_vot(audio: np.ndarray, sr: int, stop: PhonemeInstance) -> float | None:
-    pre = int(_PRE_MS / 1000 * sr)
-    post = int(_POST_MS / 1000 * sr)
-    start_sample = max(0, int(stop.start_time * sr) - pre)
-    end_sample = min(len(audio), int(stop.start_time * sr) + post)
-    segment = audio[start_sample:end_sample]
+    """VOT in ms (burst → voicing onset), or None when not measurable.
 
-    if len(segment) < int(0.02 * sr):
+    Returns None rather than a fabricated 0 when no burst or no post-burst voicing
+    can be found, so the caller drops the token instead of scoring garbage.
+    """
+    t0 = stop.start_time
+    win_start = max(0, int((t0 - _PRE_MS / 1000) * sr))
+    win_end = min(len(audio), int((t0 + _POST_MS / 1000) * sr))
+    seg = audio[win_start:win_end].astype(np.float64)
+    if len(seg) < int(0.04 * sr):
         return None
 
-    hf_energy = _bandpass_energy(segment, sr, _HF_LO, _HF_HI)
-    burst_search_frames = int(_BURST_SEARCH_MS / _HOP_MS)
-    search = hf_energy[: min(burst_search_frames, len(hf_energy))]
-    median_e = np.median(search)
-    if median_e == 0:
-        return None
-    burst_candidates = np.where(search > 3 * median_e)[0]
-    if len(burst_candidates) == 0:
-        return None
-    burst_frame = int(burst_candidates[0])
-    burst_time = start_sample / sr + burst_frame * _HOP_MS / 1000
-
-    # Voicing onset: first frame where autocorrelation peak > 0.5 (post-burst)
-    hop = int(_HOP_MS / 1000 * sr)
-    voice_time: float | None = None
-    for i in range(burst_frame, len(hf_energy)):
-        frame_start = i * hop
-        frame_end = min(frame_start + hop * 4, len(segment))
-        frame = segment[frame_start:frame_end]
-        if _autocorr_peak(frame) > 0.35:
-            voice_time = start_sample / sr + i * _HOP_MS / 1000
-            break
-
-    if voice_time is None:
+    hop = max(1, int(_HOP_MS / 1000 * sr))
+    win = max(hop, int(_FRAME_MS / 1000 * sr))
+    rms = _frame_rms(seg, hop, win)
+    if len(rms) < 5:
         return None
 
-    vot_ms = (voice_time - burst_time) * 1000
-    if vot_ms < 0:
+    # 1. Closure: min-energy frame within the closure window (before the vowel).
+    closure_n = min(len(rms), int(_CLOSURE_WINDOW_MS / _HOP_MS))
+    closure_idx = int(np.argmin(rms[:closure_n]))
+    e_closure = float(rms[closure_idx])
+    e_max = float(rms.max())
+    if e_max <= e_closure:
+        return None
+
+    # 2. Burst: first frame AFTER the closure whose energy rises out of the closure
+    #    baseline. Searching after the closure minimum excludes the preceding vowel.
+    thresh = e_closure + _BURST_RISE_FRAC * (e_max - e_closure)
+    burst_idx = next((i for i in range(closure_idx + 1, len(rms)) if rms[i] > thresh), None)
+    if burst_idx is None:
+        return None
+    t_burst = (win_start + burst_idx * hop) / sr
+
+    # 3. Voicing onset: first F0-constrained voiced run, strictly AFTER the burst.
+    snd = parselmouth.Sound(seg, sampling_frequency=sr)
+    try:
+        pitch = snd.to_pitch_ac(
+            time_step=_HOP_MS / 1000, pitch_floor=_PITCH_FLOOR_HZ, pitch_ceiling=_PITCH_CEIL_HZ
+        )
+    except Exception:  # noqa: BLE001 — pitch analysis failed → not measurable
+        return None
+    freqs = pitch.selected_array["frequency"]  # 0.0 where unvoiced
+    times = pitch.xs()
+    burst_t_local = t_burst - win_start / sr
+    min_voiced = max(1, int(_MIN_VOICE_MS / _HOP_MS))
+
+    voice_t_local: float | None = None
+    i = 0
+    n = len(freqs)
+    while i < n:
+        if freqs[i] > 0 and times[i] > burst_t_local:
+            j = i
+            while j < n and freqs[j] > 0:
+                j += 1
+            if (j - i) >= min_voiced:
+                voice_t_local = float(times[i])
+                break
+            i = j
+        else:
+            i += 1
+    if voice_t_local is None:
+        return None
+
+    t_voice = win_start / sr + voice_t_local
+    vot_ms = (t_voice - t_burst) * 1000.0
+    if vot_ms < _VOT_MIN_MS or vot_ms > _VOT_MAX_MS:
         return None
     return vot_ms
 
@@ -90,10 +147,9 @@ def extract_stop_features(
         vot = extract_vot(audio, sr, stop)
         if vot is None:
             continue
-        # Burst energy: peak HF energy in the 40 ms search window
         pre = int(_PRE_MS / 1000 * sr)
-        post = int(_BURST_SEARCH_MS / 1000 * sr)
+        post = int(_POST_MS / 1000 * sr)
         seg = audio[max(0, int(stop.start_time * sr) - pre) : int(stop.start_time * sr) + post]
-        burst_e = float(np.max(_bandpass_energy(seg, sr, _HF_LO, _HF_HI)))
+        burst_e = float(np.max(_bandpass_energy(seg, sr, _HF_LO, _HF_HI))) if len(seg) else 0.0
         results.append(StopFeatures(phoneme=stop, vot_ms=vot, burst_energy=burst_e))
     return results
