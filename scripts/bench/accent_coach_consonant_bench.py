@@ -21,7 +21,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -29,6 +28,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from accent_coach.comparison.consonants import score_consonants
 from accent_coach.models import SentenceAnalysis
 from accent_coach.pipeline.alignment import align_audio
+from accent_coach.pipeline.audio_io import load_standard_audio
 from accent_coach.pipeline.vot import extract_stop_features
 from scripts.lib.manifest import load_manifest, resolve_path
 
@@ -73,18 +73,10 @@ def _build_target_index(manifest_path: Path | None) -> dict[str, tuple[Path, str
 
 
 def _load_audio_16k(wav: Path) -> tuple[np.ndarray, int] | None:
-    try:
-        audio, sr = sf.read(str(wav), always_2d=False)
-        if audio.ndim == 2:
-            audio = audio.mean(axis=1)
-        audio = audio.astype(np.float32)
-        if sr != 16_000:
-            import librosa
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=16_000)
-            sr = 16_000
-        return audio, sr
-    except Exception:  # noqa: BLE001
-        return None
+    # Canonical normalization: mono + resample to 16 kHz + common bandwidth cap,
+    # so source sample-rate/bandwidth differences cannot bias the scores
+    # (the fricative-inversion root cause). Single path for corpus and user audio.
+    return load_standard_audio(wav)
 
 
 def _build_sentence_analysis(
