@@ -15,24 +15,18 @@ the blow-by-blow session history is summarised in [accent_coach_history.md](acce
 | Rhotic /r/ | **DONE** — strong discriminator (native−owner gap ≈ +34). |
 | Lateral /l/ | works; single-token variance (backlog). |
 | VOT / aspiration | **FUNCTIONAL, not production-grade** — collapse-to-0 fixed, discriminates directionally (real natives > owner); real-speech absolute values still under-measure → AutoVOT is the robust path. |
-| /θ ð/ detection | **OPEN (gate bug)** — the words DO contain /θ ð/ and alignment finds them, but the frication gate rejects ~100% of them for ALL groups (weak low-frequency dental frication), so /θ ð/ currently contribute nothing to anyone's score. |
+| /θ ð/ detection | **DONE** — phoneme-aware frication gate: /θ ð f v/ use HF>2 kHz at 0.04 threshold (was HF>3 kHz/0.20 for all fricatives). Real voiced /ð/ (strong F0 carrier, HF>3 kHz ratio ~0.05) now passes the gate. Batch yield: 12/12 diverse tokens scored (was ~0% for voiced dentals; unvoiced /θ/ already passed the old gate). CoG reference values (θ: 4500, ð: 4400) were derived under the old gate and may be biased; see potential_improvements for re-measurement. |
 
 ## Open items (priority order)
 
-1. **Fix the frication gate for weak dentals /θ ð/ (and /f v/).** Diagnosed via an
-   expected→aligned→measured trace: the transcripts DO contain /θ ð/ (owner: 31 /ð/ in
-   16 clips — every "the"), alignment finds all of them, but the HF>3 kHz frication gate
-   rejects ~100% — for owner AND natives — because dental frication is weak and
-   low-frequency. So /θ ð/ score nothing for anyone. Make the gate phoneme-aware (relaxed
-   HF threshold for /θ ð f v/). Once measured, the owner-vs-native difference emerges from
-   comparison: /θ/→/s/ substitution shows as too-high CoG (existing th-fronting detector),
-   /ð/→/d/ as stop-like, plus a duration cue (owner /ð/ median 120 ms vs native 50 ms).
-   Highest value.
-2. **Up-weight absent-in-Russian markers** (/r/, dental /θ ð/, aspiration) vs Russian-shared
-   phonemes. Equal-per-phoneme weighting is NOT the fix (it dilutes the few discriminators —
-   see Per-phoneme findings).
-3. **VOT real-speech accuracy → AutoVOT / Dr.VOT** (trained models; refs below).
-4. **Lateral single-token confidence weighting** — flag/down-weight sub-scores from < ~3 tokens.
+1. **Up-weight absent-in-target-accent markers** (/r/, dental /θ ð/, aspiration) vs
+   phonemes shared across accents. Equal-per-phoneme weighting dilutes the few strong
+   discriminators (/r/ +34, /p/ +9) among many tied phonemes — see Per-phoneme findings.
+2. **VOT real-speech accuracy → AutoVOT / Dr.VOT** (trained models; refs below).
+3. **Lateral single-token confidence weighting** — flag/down-weight sub-scores from < ~3 tokens.
+
+*(Item removed: /θ ð/ gate bug — fixed 2026-06-09. Phoneme-aware gate; HF>2 kHz / 0.04
+threshold for /θ ð f v/. CoG reference re-measurement deferred to potential_improvements.)*
 
 ## Design principles (these calibrate the whole pipeline — also CLAUDE.md rules)
 
@@ -74,7 +68,8 @@ natives scored "too low" while the wider-band owner scored high.
    | ʃ | 41 | 3970 | | θ | (sparse) | 4500* |
    | ʒ | (sparse) | 3480 | | ð | (sparse) | 4400* |
 
-   *θ ð are gate-biased + sparse → conservative dental estimates, low confidence.
+   *θ ð measured under old gate (HF>3 kHz/0.20 → only HF-rich tokens kept) → CoG biased
+   high; re-measure with corrected phoneme-aware gate (HF>2 kHz/0.04). See potential_improvements.
 
 **Outcome:** natives lifted ~40 → ~77; composite ranks owner lowest. Fricative CoG then ties
 across groups (~77–80) — which is *correct*: Russian /s z ʃ f/ ≈ English, so fricative CoG is
@@ -115,8 +110,9 @@ Gap = native_pooled − owner:
 ```
 TIE  (Russian-shared, frequent → dominate the class): s +2, z -3, ʃ -3, f -3, l -0
 DISCRIMINATE:  r +34 (trill vs approximant),  p +9 (aspiration)
-GATE-BUG:      θ, ð, v  — measured=0 for owner AND natives (frication gate rejects ~all
-               weak dentals; transcripts DO contain them, owner has 31 /ð/ → fix the gate)
+GATE-FIXED:    θ, ð — phoneme-aware gate (HF>2 kHz / 0.04) now measures them; CoG
+               references still conservative (old gate biased the sample high → re-measure)
+               v — labiodental, typically passes even old gate; low discrimination expected
 ```
 
 Composites (both rank owner lowest): class-weighted owner 36.8 vs natives 40–56;

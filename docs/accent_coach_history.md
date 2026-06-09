@@ -953,9 +953,17 @@ owner *above* native speakers. Summary of outcomes (full detail + open items in
 - **Stress skill deleted** (word-position heuristic, not acoustic).
 - **Per-phoneme diagnostic** — confirmed the discriminators are /r/ (+34) and /p/
   aspiration (+9); Russian-shared /s z ʃ f l/ tie and dominate by frequency.
-  /θ ð v/ score nothing for ANYONE — traced to a frication-gate bug (it rejects ~all
-  weak dentals; transcripts DO contain them, e.g. owner has 31 /ð/), not absence.
+  /θ ð v/ scored nothing for ANYONE — traced to a frication-gate bug (rejected ~all
+  weak dentals despite alignment finding them; e.g. owner has 31 /ð/ → every "the").
+- **Frication gate /θ ð/ fix (2026-06-09)** — phoneme-aware gate: /θ ð f v/ now use
+  HF>2 kHz / 0.04 threshold (was 3 kHz/0.20 for all fricatives). Root cause: voiced /ð/
+  has a strong harmonic carrier below 840 Hz that pulls the HF>3 kHz ratio to ~0.05,
+  below the sibilant threshold. Batch yield: 12/12 synthetic tokens scored (was ~0%
+  for voiced dentals). CoG reference values for θ/ð were measured under the old
+  gate and may be biased; re-measurement is a backlog item.
+  6 new tests in `test_consonants_quality.py` (Section 14): gate accepts voiced /ð/,
+  rejects stop closures, yield ≥90%, documents the pre-fix yield was <50%.
 
-**Still open:** /θ ð/ frication-gate fix (biggest gap), up-weighting
-absent-in-Russian markers, production-grade VOT (AutoVOT), lateral single-token noise.
+**Still open:** up-weighting absent-in-target-accent markers (/r/, /θ ð/, aspiration),
+production-grade VOT (AutoVOT), lateral single-token noise, /θ ð/ CoG re-measurement.
 Governance + post-mortem lessons codified in CLAUDE.md.

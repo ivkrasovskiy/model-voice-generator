@@ -186,10 +186,12 @@ RP_PITCH_TEMPLATES: dict[str, list[float]] = {
 # means are the only fair reference for the band we actually measure in.
 #
 # Sample sizes (pooled): s n=455, z n=331, ʃ n=41, v n=36, ð n=27, f n=23 are
-# solid; θ (n=1) and ʒ (n=4) are sparse. /θ ð/ are weak fricatives whose CoG the
-# frication gate biases high (it keeps only HF-rich tokens) — so the dental values
-# are conservative phonetic estimates, not raw measurements. See
-# docs/accent_coach_potential_improvements.md (weak-fricative gate bias).
+# solid; θ (n=1) and ʒ (n=4) are sparse. /θ ð/ values were measured under the OLD
+# frication gate (HF>3 kHz / 0.20) which kept only HF-rich tokens → CoG biased high.
+# The phoneme-aware gate (HF>2 kHz / 0.04) is now used for /θ ð/ in scoring, but the
+# reference values here predate that fix and have not been re-measured. Re-run
+# scripts/tools/measure_fricative_cog.py to get unbiased estimates. See
+# docs/accent_coach_potential_improvements.md item 10 (dental CoG re-measurement).
 # ---------------------------------------------------------------------------
 RP_FRICATIVE_COG_HZ: dict[str, float] = {
     "s":  5200.0,   # in-domain native mean, n=455 (Jongman 7000 @22 kHz)

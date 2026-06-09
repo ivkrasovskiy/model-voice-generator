@@ -3,7 +3,7 @@
 Backlog of quality/robustness ideas that are **not** correctness-critical. Critical
 fallback/measurement bugs are tracked in
 [prosody_consonant_upgrade.md](prosody_consonant_upgrade.md); this file is the
-"nice to have / revisit" list. Date: 2026-06-07.
+"nice to have / revisit" list. Date: 2026-06-09.
 
 ## Scoring reliability
 
@@ -64,3 +64,26 @@ fallback/measurement bugs are tracked in
 9. **VOT RMS normalisation.** If/when the VOT extractor is fixed, RMS-normalise
    the filtered signal before the burst threshold so detection is gain-invariant
    (run the same clip at two gains → same VOT).
+
+10. **Re-measure /θ ð/ CoG references with the corrected gate.** The in-domain
+    reference values in `rp_norms.py` (θ: 4500 Hz, ð: 4400 Hz) were measured using
+    `scripts/tools/measure_fricative_cog.py` under the old HF>3 kHz / 0.20 gate, which
+    accepted only the HF-richest dental tokens and biased the mean CoG upward. Now that
+    the phoneme-aware gate (HF>2 kHz / 0.04) accepts the full range of dental frication
+    (including the voiced /ð/ tokens that were previously rejected), a re-run of
+    `measure_fricative_cog.py` on the native RP and GenAm corpora would give unbiased
+    estimates. Low urgency: the current references are conservative (high side) — a
+    /θ/→/s/ substitution still scores low, and correct /θ ð/ still scores higher than
+    substitution. But the absolute levels will be off, and the TH-fronting threshold
+    (`RP_TH_S_SUBSTITUTION_THRESHOLD_HZ = 4900`) was set relative to the old /s/ reference
+    (7000 Hz); it should be re-checked against the re-measured dental means.
+
+11. **Duration cue for /ð/→/d/ substitution.** Diagnosed: owner /ð/ median 120 ms vs
+    native 50 ms (2.4×). A /d/ substitution in "the/that/with" sounds shorter because
+    it's a stop burst + voicing rather than extended frication. The CoG scorer detects
+    /θ/→/s/ via spectral shape; it cannot detect /ð/→/d/ (stop substitution has low CoG
+    because it has little frication energy at all — the gate drops it rather than penalising
+    it). A separate duration-based check for the dental slot would catch this without
+    needing a stop detector: if the aligned /ð/ window has near-zero frication energy
+    AND short duration, flag it as stop-like. Hard to calibrate cross-accent and across
+    speaking rates; low priority until the CoG path is validated on real speech.
