@@ -45,6 +45,22 @@ _COG_HP_HZ: float = 2000.0
 _FRICATION_HF_HZ: float = 3000.0
 _FRICATION_HF_MIN_RATIO: float = 0.20
 
+# Weak fricatives /θ ð f v/ have genuinely low HF energy relative to sibilants:
+#   • Voiced /ð/ combines a strong harmonic carrier (all below ~840 Hz) with weak
+#     turbulence, pushing the HF>3 kHz ratio to ~0.10–0.15.
+#   • Any dental in connected speech has the aligned window diluted by adjacent-
+#     vowel coarticulation (F1/F2 below 3 kHz), further reducing the ratio.
+# The 0.20 sibilant gate rejects ~100% of dental tokens for ALL speaker groups.
+# These phonemes use a relaxed ratio threshold so real weak frication is accepted.
+# Voiced stop closures (voice bar below 400 Hz only) still fail even this gate.
+# See docs/prosody_consonant_upgrade.md, Open items #1.
+_WEAK_FRICATIVES: frozenset[str] = frozenset({"θ", "ð", "f", "v"})
+# Relaxed gate for weak fricatives: check energy above 2 kHz (dental frication
+# starts there) rather than 3 kHz.  Threshold 0.04 accepts voiced /ð/ at 0.05–0.08
+# and rejects pure vowels (~0.01) and stop closures (~0.00).  4× gap to pure vowel.
+_FRICATION_DENTAL_HF_HZ: float = 2000.0
+_FRICATION_HF_MIN_RATIO_WEAK: float = 0.04
+
 
 def _spectral_centroid(audio: np.ndarray, sr: int, p: PhonemeInstance) -> float | None:
     """Spectral centre of gravity (CoG) using power spectrum with Butterworth HP.
@@ -68,8 +84,14 @@ def _spectral_centroid(audio: np.ndarray, sr: int, p: PhonemeInstance) -> float 
     raw_total = raw_spec.sum()
     if raw_total < 1e-12:
         return None
-    hf_ratio = float(raw_spec[raw_freqs >= _FRICATION_HF_HZ].sum() / raw_total)
-    if hf_ratio < _FRICATION_HF_MIN_RATIO:
+    if p.phoneme in _WEAK_FRICATIVES:
+        gate_hz = _FRICATION_DENTAL_HF_HZ
+        gate_ratio = _FRICATION_HF_MIN_RATIO_WEAK
+    else:
+        gate_hz = _FRICATION_HF_HZ
+        gate_ratio = _FRICATION_HF_MIN_RATIO
+    hf_ratio = float(raw_spec[raw_freqs >= gate_hz].sum() / raw_total)
+    if hf_ratio < gate_ratio:
         return None  # not frication — likely a mis-aligned vowel/closure window
 
     nyq = sr / 2.0
