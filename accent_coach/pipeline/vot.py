@@ -15,7 +15,7 @@ onset. This implementation follows validated methods (AutoVOT / Praat):
      75 / ceiling 400 Hz) STRICTLY AFTER the burst, persisting ≥ 20 ms. This is
      what prevents the preceding vowel from being read as the onset.
 
-See docs/vot_bug_diagnosis.md.
+See docs/prosody_consonant_upgrade.md.
 """
 from __future__ import annotations
 

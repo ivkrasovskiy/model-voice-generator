@@ -7,7 +7,7 @@ where the old greedy extractor collapses to ~0 (it reads the preceding/following
 vowel's periodicity as the stop's voicing onset).
 
 Several tests here are EXPECTED TO FAIL against the current extractor and pass
-after the Lisker-&-Abramson rewrite. See docs/vot_bug_diagnosis.md.
+after the Lisker-&-Abramson rewrite. See docs/prosody_consonant_upgrade.md.
 """
 from __future__ import annotations
 

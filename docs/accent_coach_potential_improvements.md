@@ -2,18 +2,22 @@
 
 Backlog of quality/robustness ideas that are **not** correctness-critical. Critical
 fallback/measurement bugs are tracked in
-[consonant_scoring_audit.md](consonant_scoring_audit.md); this file is the
+[prosody_consonant_upgrade.md](prosody_consonant_upgrade.md); this file is the
 "nice to have / revisit" list. Date: 2026-06-07.
 
 ## Scoring reliability
 
-1. **Lateral /l/ is often a single token per clip — mark as suspicious.**
-   Many bench clips contain only one /l/, so the lateral sub-score is a
-   one-sample mean with huge variance (this is why owner lateral swung from
-   "lowest" to "highest" once fabricated 50s were removed — the real signal is
-   just noisy at n=1). Improvement: attach a token-count / confidence to each
-   sub-score and **flag or down-weight sub-scores computed from < ~3 tokens**
-   instead of treating a 1-token mean as equal to a 15-token mean.
+1. **Lateral /l/ — small-sample noise (NOT a detection bug).** Verified by an
+   expected→aligned→measured trace: every spoken /l/ IS measured (15=15=15 for the
+   owner; no gate loss, unlike /θ ð/). The problem is *count*: the short calibration
+   sentences are /l/-light — mean ≈ 0.9–1.1 /l/ per clip, and ~6/16 owner clips have
+   ZERO /l/ — so the group score rests on only ~15 tokens. The bench amplifies this by
+   averaging per-CLIP means (a 1-/l/ clip is weighted the same as a 3-/l/ clip), which
+   is what makes the group lateral score swing between random samples. Fixes (none
+   involve tuning to noise): **pool /l/ tokens across clips** instead of averaging
+   clip-means; use more/longer sentences; attach a token-count confidence and flag
+   sub-scores from < ~3 tokens. Bonus cue: owner /l/ median 167 ms vs native 49 ms
+   (3.4×) — a likely vocalized/syllabic or Russian-dark /l/, currently unused.
 
 2. **Rhotic RP token scarcity.** The pre-vocalic /r/ gate (correct for
    non-rhotic RP) leaves only ~4–6 /r/ tokens per RP clip vs ~12–15 for GA, so

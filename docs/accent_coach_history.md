@@ -924,3 +924,38 @@ transcript so fall back to acoustic detection within hybrid mode.
   coaching signal direction is correct (user needs to reduce stress-timing contrast,
   i.e. more fluid).
 - Bench sanity check: OK.
+
+---
+
+## Consonant scoring overhaul (2026-06-05 → 06-09)
+
+Audited and rebuilt the consonant/prosody scoring after the bench ranked the L2
+owner *above* native speakers. Summary of outcomes (full detail + open items in
+[prosody_consonant_upgrade.md](prosody_consonant_upgrade.md)):
+
+- **Silent fallbacks removed** across alignment, liquids, aggregator, prosody,
+  compare(): code now fails explicitly (raise / `None`-skip) instead of fabricating
+  neutral (50/65) or uniform values. A silent uniform G2P split had made the whole
+  consonant bench meaningless.
+- **Alignment §2A fixed** — WhisperX char alignments (stored at segment level) now
+  actually drive phoneme boundaries; deleted the uniform splitter (`AlignmentError`).
+- **Audio normalization** — one canonical `normalize_audio` (mono/16 kHz/7.6 kHz cap)
+  on bench + product path; vowels unaffected.
+- **Fricatives** — fixed an audio-**bandwidth confound** (native corpora 16 kHz vs
+  owner 44.1 kHz made CoG measure recording bandwidth); replaced Jongman's 7000 Hz
+  /s/ with an **in-domain native reference** (/s/≈5200). Natives lifted ~40→77;
+  composite now ranks owner lowest. Fricative CoG ties — correct, since Russian /s z
+  ʃ f/ ≈ English.
+- **VOT/aspiration** — rewrote the extractor (collapse-to-0 bug) to Lisker & Abramson
+  (closure→burst→F0 voicing) + aspirating-context filtering. Functional and
+  discriminates directionally (native > owner); real-speech accuracy still needs a
+  trained model (AutoVOT) — backlog.
+- **Stress skill deleted** (word-position heuristic, not acoustic).
+- **Per-phoneme diagnostic** — confirmed the discriminators are /r/ (+34) and /p/
+  aspiration (+9); Russian-shared /s z ʃ f l/ tie and dominate by frequency.
+  /θ ð v/ score nothing for ANYONE — traced to a frication-gate bug (it rejects ~all
+  weak dentals; transcripts DO contain them, e.g. owner has 31 /ð/), not absence.
+
+**Still open:** /θ ð/ frication-gate fix (biggest gap), up-weighting
+absent-in-Russian markers, production-grade VOT (AutoVOT), lateral single-token noise.
+Governance + post-mortem lessons codified in CLAUDE.md.

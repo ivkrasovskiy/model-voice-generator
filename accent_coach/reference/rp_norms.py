@@ -206,7 +206,7 @@ RP_FRICATIVE_COG_HZ: dict[str, float] = {
 # Calibrated to the WITHIN-NATIVE spread (measured in-domain: /s/ SD≈770, /z/ SD≈675)
 # so ~1 native SD costs a moderate penalty (~30 pts), NOT tuned to a score level.
 # Forbidden to widen toward a "believable band" (CLAUDE.md: never tune to a level —
-# it once inverted the native−owner gap). See docs/consonant_scoring_audit.md.
+# it once inverted the native−owner gap). See docs/prosody_consonant_upgrade.md.
 RP_FRICATIVE_COG_DECAY_HZ: float = 2000.0
 
 # Threshold above which a /θ ð/ token sounds like /s z/ substitution (TH-fronting).
