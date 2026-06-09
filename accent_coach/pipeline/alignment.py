@@ -431,3 +431,30 @@ def filter_stops(
     if stressed_only:
         result = [p for p in result if p.is_stressed]
     return result
+
+
+def filter_aspirating_stops(phonemes: list[PhonemeInstance]) -> list[PhonemeInstance]:
+    """Voiceless stops /p t k/ in ASPIRATING context only.
+
+    English aspirates /p t k/ with a long VOT only when they are stressed,
+    syllable-initial, and PREVOCALIC; aspiration is suppressed after /s/
+    (/sp st sk/) and before a non-vowel (sonorant/consonant cluster). Outside
+    that context the VOT is short for EVERYONE, so it carries no accent signal —
+    measuring it there dilutes the English-vs-L2 aspiration contrast to noise
+    (which is why native and owner VOT looked identical). This filter isolates
+    the position where the contrast actually lives.
+    """
+    stop_ipas = {"p", "t", "k"}
+    ordered = sorted(phonemes, key=lambda x: x.start_time)
+    result: list[PhonemeInstance] = []
+    for i, p in enumerate(ordered):
+        if p.phoneme not in stop_ipas or not p.is_stressed:
+            continue
+        nxt = ordered[i + 1].phoneme if i + 1 < len(ordered) else None
+        prev = ordered[i - 1].phoneme if i > 0 else None
+        if nxt not in IPA_VOWELS:   # must be prevocalic to aspirate
+            continue
+        if prev == "s":             # post-/s/ → unaspirated, skip
+            continue
+        result.append(p)
+    return result

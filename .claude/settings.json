@@ -136,7 +136,8 @@
       "Bash(rm -f /tmp/cons_bench.log)",
       "Bash(echo \"launched pid $!\")",
       "Bash(pkill -f \"consonant_bench\")",
-      "Bash(cd /Users/ivkrasovskii/model-voice-generator; rm -f accent_coach/comparison/stress.py accent_coach/comparison/__pycache__/stress.cpython-311.pyc; echo \"deleted stress.py\"; echo \"=== accent_coach_bench header/columns near stress ===\"; rtk read scripts/bench/accent_coach_bench.py | sed -n '95,125p')"
+      "Bash(cd /Users/ivkrasovskii/model-voice-generator; rm -f accent_coach/comparison/stress.py accent_coach/comparison/__pycache__/stress.cpython-311.pyc; echo \"deleted stress.py\"; echo \"=== accent_coach_bench header/columns near stress ===\"; rtk read scripts/bench/accent_coach_bench.py | sed -n '95,125p')",
+      "Bash(cd /Users/ivkrasovskii/model-voice-generator; rtk git rm docs/further_improvements.md 2>/dev/null || rm -f docs/further_improvements.md; echo \"removed further_improvements.md\"; echo \"=== remaining accent docs ===\"; rtk ls docs/ | rtk grep -iE 'prosody|improv|audit|vot|further')"
     ],
     "additionalDirectories": [
       "/private/tmp",

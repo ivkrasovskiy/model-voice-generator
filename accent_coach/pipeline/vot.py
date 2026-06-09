@@ -24,7 +24,7 @@ import parselmouth
 from scipy.signal import butter, sosfilt
 
 from accent_coach.models import PhonemeInstance, StopFeatures
-from accent_coach.pipeline.alignment import filter_stops
+from accent_coach.pipeline.alignment import filter_aspirating_stops
 
 # Search window around the aligned stop boundary (char-aligned start_time ≈ closure
 # onset). Generous enough to contain closure → burst → aspiration → voicing.
@@ -45,8 +45,10 @@ _MIN_VOICE_MS = 20.0
 _PITCH_FLOOR_HZ = 75.0
 _PITCH_CEIL_HZ = 400.0
 # Plausibility bounds (ms): outside this, treat as a detection failure (None).
+# Aspirated English /p t k/ peak ~125 ms; >150 ms is a spurious detection
+# (e.g. an unreleased utterance-final stop whose "voicing" is the next word).
 _VOT_MIN_MS = -150.0
-_VOT_MAX_MS = 200.0
+_VOT_MAX_MS = 150.0
 
 _HF_LO = 2000
 _HF_HI = 7500  # < Nyquist at 16 kHz
@@ -141,7 +143,8 @@ def extract_vot(audio: np.ndarray, sr: int, stop: PhonemeInstance) -> float | No
 def extract_stop_features(
     audio: np.ndarray, sr: int, phonemes: list[PhonemeInstance]
 ) -> list[StopFeatures]:
-    stops = filter_stops(phonemes, stressed_only=True)
+    # Only aspirating-context stops carry the English-vs-L2 VOT contrast.
+    stops = filter_aspirating_stops(phonemes)
     results: list[StopFeatures] = []
     for stop in stops:
         vot = extract_vot(audio, sr, stop)

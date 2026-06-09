@@ -104,3 +104,33 @@ def test_aspirated_vot_in_english_range():
     assert vot is not None and 50 <= vot <= 125, (
         f"Aspirated /p/ VOT={vot} ms — expected 50–125 ms."
     )
+
+
+def _seq(*specs):
+    """Build a phoneme sequence from (ipa, stressed) tuples at 0.1 s spacing."""
+    out = []
+    for i, (ipa, st) in enumerate(specs):
+        out.append(PhonemeInstance(phoneme=ipa, arpabet=ipa.upper(), start_time=0.1 * i,
+                                   end_time=0.1 * i + 0.05, sentence_id=1, word="w", is_stressed=st))
+    return out
+
+
+def test_aspirating_filter_keeps_only_prevocalic_non_s_cluster_stops():
+    """VOT must be measured only on aspirating-context stops (the accent signal).
+
+    Kept: stressed /p/ before a vowel. Dropped: /t/ after /s/ (st cluster,
+    unaspirated), /k/ before a consonant (not prevocalic), unstressed /p/.
+    """
+    from accent_coach.pipeline.alignment import filter_aspirating_stops
+
+    phons = _seq(
+        ("p", True), ("ɑː", True),   # /pɑ/  → KEEP (stressed, prevocalic)
+        ("s", True), ("t", True), ("ɪ", True),  # /stɪ/ → /t/ post-/s/ → DROP
+        ("k", True), ("l", True),    # /kl/  → /k/ before consonant → DROP
+        ("p", False), ("ə", True),   # unstressed /p/ → DROP
+    )
+    kept = filter_aspirating_stops(phons)
+    assert [p.phoneme for p in kept] == ["p"], (
+        f"expected only the prevocalic stressed /p/, got {[p.phoneme for p in kept]}"
+    )
+    assert kept[0].is_stressed and abs(kept[0].start_time - 0.0) < 1e-6

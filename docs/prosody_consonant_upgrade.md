@@ -1,7 +1,9 @@
 # Prosody & Consonant Module Upgrade Plan
 
-Extracted from `docs/further_improvements.md`.
-Context: three comparison modules exist but are thin stubs. This doc lists what to add to each.
+Living record of the rhythm/intonation/consonant scoring fixes (alignment,
+silent-fallback removal, bandwidth normalization, in-domain fricative reference,
+VOT rewrite, per-phoneme analysis). The original implementation spec it grew from
+has been retired now that the modules are built.
 
 ---
 
@@ -443,3 +445,108 @@ natives — Russian /s/ ≈ English /s/ in CoG (same place of articulation). The
 "owner strictly lowest on fricatives" invariant is therefore too strong for this
 L1; fricatives are not an accent discriminator here. Discrimination for this
 speaker lives in vowels, rhotics, laterals, and (once fixed) VOT.
+
+### VOT rewrite — result (2026-06-08)
+
+Rewrote `extract_vot` (Lisker & Abramson via parselmouth, no new deps):
+closure baseline → broadband burst transient (searched only AFTER the closure
+minimum) → first F0-constrained voiced run (pitch floor 75 / ceiling 400)
+STRICTLY after the burst, persisting ≥20 ms. Returns None (not a fabricated 0)
+when no burst / no post-burst voicing.
+
+TDD: business-logic tests on hand-checkable synthetic ground truth
+(tests/accent_coach/test_vot.py) — known-VOT connected /apa/, short-vs-long
+separation, English aspirated range. All pass; the old §2B/§2C tests that pinned
+the deleted median-window/autocorr internals were retired.
+
+**Synthetic:** fixed — isolated AND connected (post-vocalic) stops measure the
+true VOT; the preceding-vowel collapse to ~0 is gone.
+
+**Real clips:** much improved but not production-grade. Stop sub-score (was ≈0
+for all groups): real_bc 11.6, tts_bc 7.7, genam 6.1 now register vs owner 0.7;
+but rp_fry (0.5) is still low — real connected speech is messier than synthetic
+(weak/ambiguous bursts, closure voicing), so many native tokens still
+under-measure below the 50–125 ms aspirated range. Directionally native > owner
+is emerging but noisy.
+
+**Verdict:** the collapse bug is fixed and the metric is honest (None, not 0);
+robust production-grade real-speech VOT needs a trained model (AutoVOT / Dr.VOT)
+per docs/vot_bug_diagnosis.md — the heuristic's ceiling on messy audio.
+
+### Overall consonant bench after all fixes (n=12, accent=rp)
+
+```
+metric      owner   lowest-other   gap    owner-lowest?
+composite    33.0    38.7 (tts)    +5.7   ✓   (was inverted at session start)
+fricative    78.2    77.1          -1.1   ✗ noise (all 77–80; RU /s/≈EN /s/, non-discriminating)
+rhotic       37.6    40.7          +3.0   ✓
+stop_vot      0.7     0.5          -0.2   ✗ noise (VOT still under-measured on real speech)
+lateral      64.5    46.9         -17.6   ✗ single-token noise (backlog)
+```
+
+Composite now correctly ranks owner lowest. Remaining real inversion is lateral
+(single-token variance) — see accent_coach_potential_improvements.md.
+
+### VOT real-speech robustness — aspirating-context filter (2026-06-08)
+
+Root cause of native≈owner VOT was NOT detection — it was MEASURING THE WRONG
+STOPS. English aspirates /p t k/ (long VOT) only when stressed + syllable-initial
++ PREVOCALIC and NOT post-/s/. The bench measured all stressed stops, including
+/str/, /pl/, /kl/ clusters and unreleased final stops — short for everyone, no
+accent signal. Added `filter_aspirating_stops` (prevocalic, non-post-/s/) and
+tightened the implausible-VOT cap to 150 ms.
+
+Result (n=16): every REAL native now scores above owner on stop_vot
+(real_bc 12.6, genam 7.6, rp 3.7–4.6 vs owner 1.9); only the TTS *clone* (1.8)
+dips below (synthetic aspiration). Composite gap +11.2 ✓, rhotic +18.7 ✓.
+Remaining VOT ceiling on messy real audio → AutoVOT (backlog).
+
+### Per-phoneme consonant discrimination — Phase 1 result (2026-06-09)
+
+`scripts/tools/consonant_per_phoneme.py` (CSV: tts_output/accent_coach/consonant_per_phoneme.csv).
+Per-phoneme mean score (n tokens), gap = native_pooled − owner:
+
+```
+ph    owner  nat_pool  gap     note
+s     76(8)    78      +2   TIE  — Russian /s/≈English /s/ (frequent → dominates fricative class)
+z     81(3)    78      -3   TIE
+ʃ     90(1)    87      -3   TIE  — Russian has /ʃ/
+f     76(2)    73      -3   TIE  — Russian has /f/
+l     53(11)   52      -0   TIE
+θ      -(0)    68       -   owner produces NO measurable /θ/ (substitutes → /s/ or gate-rejected)
+ð      -(0)    77       -   owner produces NO measurable /ð/
+v      -(0)    71       -   owner produces NO measurable /v/ token in sample
+p      1(3)    10      +9   DISCRIMINATES — aspiration (Russian unaspirated)
+t      2       4       +2   (VOT detection still weak on real speech)
+k      2       1       -1
+r     23(9)    57     +34   DISCRIMINATES STRONGLY — Russian trill vs English approximant
+```
+
+Composites (both rank owner lowest):
+```
+group         class_weighted   equal_phoneme
+owner             36.8            44.9   ← lowest in both
+rp_fry            40.3            53.1
+rp_lindsey        55.6            53.3
+real_bc           48.4            51.3
+genam_harris      52.3            56.5
+tts_bc            46.3            53.6
+```
+
+**Findings (all three user hypotheses confirmed):**
+1. **Russian-close sounds tie** (/s z ʃ f l/, gap≈0) and DOMINATE by token frequency
+   (/s/ owner n=8, natives n=24–45) → they drag the fricative class to a tie.
+2. **The real discriminators are /r/ (+34) and /p/ aspiration (+9)** — exactly the
+   sounds absent/different in Russian. They work, but are outnumbered.
+3. **The strongest markers /θ ð v/ are INVISIBLE**: the owner produces zero
+   measurable /θ ð/ tokens — the Russian /θ/→/s/, /ð/→/z d/ substitution means the
+   error never registers as a /θ/ score (it's measured as the substituted sound or
+   gate-rejected). The biggest accent tell is silently absent from the score.
+
+**Equal-phoneme weighting is NOT the fix** — it gives a SMALLER owner−native gap
+(owner 44.9 vs native ~53, gap ~8) than class-weighting (36.8 vs ~49, gap ~12),
+because weighting every phoneme equally dilutes the few discriminators (/r/, /p/)
+among many tied Russian-shared phonemes. Real fixes: (a) capture the /θ ð/
+substitution as a /θ ð/ penalty so it stops vanishing; (b) up-weight the
+absent-in-Russian markers (/r/, /θ ð/, aspiration) rather than equal-weighting.
+Both composites preserved in the tool for comparison.

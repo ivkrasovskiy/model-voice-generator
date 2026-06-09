@@ -365,8 +365,8 @@ def test_fricative_cog_tables_are_accent_neutral():
     Fix: update RP table to match GA (the correctly-cited source).
     Fails as long as the two tables are separate copies with different values.
     """
-    from accent_coach.reference.rp_norms import RP_FRICATIVE_COG_HZ
     from accent_coach.reference.genam_norms import GA_FRICATIVE_COG_HZ
+    from accent_coach.reference.rp_norms import RP_FRICATIVE_COG_HZ
 
     differing = [(k, RP_FRICATIVE_COG_HZ[k], GA_FRICATIVE_COG_HZ[k])
                  for k in RP_FRICATIVE_COG_HZ if RP_FRICATIVE_COG_HZ[k] != GA_FRICATIVE_COG_HZ[k]]
@@ -536,114 +536,12 @@ def test_butterworth_hp_not_hard_mask():
 
 
 # ---------------------------------------------------------------------------
-# Section 11 — §2B: VOT median on search window
+# VOT extraction (burst → voicing onset) — business-logic tests moved to
+# tests/accent_coach/test_vot.py. The old §2B/§2C tests pinned the deleted
+# median-window / autocorr-threshold internals of the previous greedy detector;
+# the rewrite (closure → burst → F0-constrained voicing) is covered there on
+# hand-checkable ground truth (connected-speech VOT, short-vs-long, English range).
 # ---------------------------------------------------------------------------
-
-
-def test_vot_median_on_search_window_detects_burst():
-    """VOT burst detection must use search-window median, not full-window median.
-
-    Scenario: moderate burst at stop boundary + loud broadband noise AFTER the
-    search window.  Full-window median is elevated by the loud post-search noise,
-    raising 3× threshold above the burst energy → burst not detected (vot = None).
-    Search-window median is near the background level → 3× threshold is low →
-    burst detected → vot ≈ 70 ms.
-
-    Fix: `median_e = np.median(search)` (pipeline/vot.py line ~55)
-    """
-    import numpy as np
-    from accent_coach.models import PhonemeInstance
-    from accent_coach.pipeline.vot import extract_vot
-
-    _SR = 16_000
-    n = int(0.35 * _SR)
-    rng = np.random.default_rng(0)
-
-    audio = (rng.standard_normal(n) * 0.01).astype(np.float32)  # low background
-
-    # Moderate burst at 0.02 s (within search window)
-    b_s = int(0.02 * _SR)
-    audio[b_s: b_s + int(0.005 * _SR)] += (
-        rng.standard_normal(int(0.005 * _SR)) * 0.25
-    ).astype(np.float32)
-
-    # Voicing onset at 0.09 s — amplitude 0.8 sine (autocorr ≈ 0.58 > 0.5 for
-    # a fully-voiced frame, ensuring voicing is detectable with the current
-    # threshold = 0.5 so the §2B test is independent of §2C).
-    v_s = int(0.09 * _SR)
-    t_v = np.arange(n - v_s, dtype=np.float64) / _SR
-    audio[v_s:] += (0.8 * np.sin(2 * np.pi * 120 * t_v)).astype(np.float32)
-
-    # Loud broadband noise starting at 0.11 s (frame 22 of the 44-frame segment).
-    # Frames 21-43 are loud (23/44 = 52 %), so the full-window median is in the
-    # loud range and suppresses the burst under the 3× threshold.
-    # Frame 18's 4-hop autocorr window (samples 1440-1759) ends before loud at
-    # sample 1760, so the voicing detection at frame 18 is uncontaminated.
-    loud_s = int(0.11 * _SR)
-    audio[loud_s:] += (rng.standard_normal(n - loud_s) * 0.9).astype(np.float32)
-
-    stop = PhonemeInstance(
-        phoneme="p", arpabet="P", start_time=0.02, end_time=0.07,
-        sentence_id=1, word="pop", is_stressed=True,
-    )
-    vot = extract_vot(audio, _SR, stop)
-    assert vot is not None and 40 < vot < 120, (
-        f"vot={vot} — burst at 0.02 s, voicing at 0.09 s, loud noise after search window. "
-        "Full-window median is elevated above the burst by the loud post-search noise. "
-        "Fix: median_e = np.median(search)  (search window only)."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Section 12 — §2C: voicing onset threshold 0.5 → 0.35
-# ---------------------------------------------------------------------------
-
-
-def test_voicing_threshold_catches_partial_onset():
-    """Voicing onset at autocorr ≈ 0.39 must be detected at threshold 0.35.
-
-    Signal: sine (amplitude 1.0) + noise (amplitude 0.5) starts at 0.09 s.
-    Fully-voiced frame autocorr ≈ (0.5 × 0.58) / (0.5 + 0.25) ≈ 0.39
-      threshold 0.35: detects at the first fully-voiced frame → VOT ≈ 70 ms
-      threshold 0.50: 0.39 < 0.5 → NEVER detected → vot = None
-
-    Fails with current threshold 0.5 (vot = None).
-    Fix: change `> 0.5` to `> 0.35` in pipeline/vot.py autocorr check.
-    """
-    import numpy as np
-    from accent_coach.models import PhonemeInstance
-    from accent_coach.pipeline.vot import extract_vot
-
-    _SR = 16_000
-    n = int(0.35 * _SR)
-    rng = np.random.default_rng(9)
-
-    audio = np.zeros(n, dtype=np.float32)
-
-    # Clear burst at 0.02 s
-    b_s = int(0.02 * _SR)
-    audio[b_s: b_s + int(0.005 * _SR)] += (
-        rng.standard_normal(int(0.005 * _SR)) * 0.6
-    ).astype(np.float32)
-
-    # Partial voicing onset at 0.09 s: sine + moderate noise → autocorr ≈ 0.39
-    v_s = int(0.09 * _SR)
-    t_v = np.arange(n - v_s, dtype=np.float64) / _SR
-    audio[v_s:] += (
-        np.sin(2 * np.pi * 120 * t_v)
-        + 0.5 * rng.standard_normal(n - v_s)
-    ).astype(np.float32)
-
-    stop = PhonemeInstance(
-        phoneme="p", arpabet="P", start_time=0.02, end_time=0.07,
-        sentence_id=1, word="pop", is_stressed=True,
-    )
-    vot = extract_vot(audio, _SR, stop)
-    assert vot is not None and 40 < vot < 110, (
-        f"vot={vot} — voicing onset at autocorr ≈ 0.39 must give VOT 40-110 ms. "
-        "Threshold 0.5 never detects this onset (0.39 < 0.5) → vot = None. "
-        "Fix: lower autocorr gate from 0.5 to 0.35 in pipeline/vot.py."
-    )
 
 
 # ---------------------------------------------------------------------------
