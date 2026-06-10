@@ -137,7 +137,12 @@
       "Bash(echo \"launched pid $!\")",
       "Bash(pkill -f \"consonant_bench\")",
       "Bash(cd /Users/ivkrasovskii/model-voice-generator; rm -f accent_coach/comparison/stress.py accent_coach/comparison/__pycache__/stress.cpython-311.pyc; echo \"deleted stress.py\"; echo \"=== accent_coach_bench header/columns near stress ===\"; rtk read scripts/bench/accent_coach_bench.py | sed -n '95,125p')",
-      "Bash(cd /Users/ivkrasovskii/model-voice-generator; rtk git rm docs/further_improvements.md 2>/dev/null || rm -f docs/further_improvements.md; echo \"removed further_improvements.md\"; echo \"=== remaining accent docs ===\"; rtk ls docs/ | rtk grep -iE 'prosody|improv|audit|vot|further')"
+      "Bash(cd /Users/ivkrasovskii/model-voice-generator; rtk git rm docs/further_improvements.md 2>/dev/null || rm -f docs/further_improvements.md; echo \"removed further_improvements.md\"; echo \"=== remaining accent docs ===\"; rtk ls docs/ | rtk grep -iE 'prosody|improv|audit|vot|further')",
+      "Bash(tee /tmp/vot_per_source.log)",
+      "Bash(tee /tmp/vot_after_fix.log)",
+      "Bash(git diff *)",
+      "Bash(cp /tmp/vot_synth_check.py /Users/ivkrasovskii/model-voice-generator/vot_synth_check_tmp.py)",
+      "Bash(rm /Users/ivkrasovskii/model-voice-generator/vot_synth_check_tmp.py)"
     ],
     "additionalDirectories": [
       "/private/tmp",
@@ -152,7 +157,8 @@
       "/Users/ivkrasovskii/model-voice-generator/tts_output/owner_cal_50",
       "/Users/ivkrasovskii/model-voice-generator/tts_output/accent_coach/phase0_16/dsp_bc_voice_ga",
       "/Users/ivkrasovskii/model-voice-generator/scripts/lib",
-      "/Users/ivkrasovskii/model-voice-generator/accent_coach/comparison"
+      "/Users/ivkrasovskii/model-voice-generator/accent_coach/comparison",
+      "/Users/ivkrasovskii/model-voice-generator"
     ]
   }
 }

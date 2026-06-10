@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pytest
 from scipy.signal import butter, sosfilt
 
 from accent_coach.models import PhonemeInstance, SentenceAnalysis, StopFeatures
@@ -175,6 +176,63 @@ def test_vot_gap_native_vs_zero_at_least_85():
     zero, _ = score_stops(_sentence([], [_stop("p", 5.0)]))
     assert native is not None and zero is not None
     assert native - zero >= 85, f"VOT gap={native - zero:.1f}. Expected ≥ 85."
+
+
+# ---------------------------------------------------------------------------
+# Section 2b — In-domain VOT reference (Open item #2)
+#
+# RP_VOT_MEAN_MS/SD (Lisker & Abramson 1964, 67.5-87.5 ms) describe TEXTBOOK
+# isolated-word VOT, not what extract_vot measures through this pipeline on
+# connected speech. Real in-domain VOT (scripts/tools/consonant_per_phoneme.py,
+# n=24/group, see docs/prosody_consonant_upgrade.md) is 0-22 ms even for
+# natives:
+#   /p/ native=9.8ms (n=16)  owner=1.7ms (n=8)  raw gap +8.0ms
+#   /t/ native=16.0ms (n=41) owner=3.5ms (n=13) raw gap +12.5ms
+#   /k/ native=9.5ms (n=48)  owner=1.6ms (n=8)  raw gap +7.9ms
+#
+# Scoring these against the textbook reference puts BOTH groups 6-9 SD away
+# -> scores < 2/100 for everyone, score-gap < 1 point (same bandwidth-confound
+# pattern as the pre-fix fricative CoG, see Section 1). Re-deriving
+# RP_VOT_MEAN_MS/SD in-domain (mirroring measure_fricative_cog.py /
+# scripts/tools/measure_vot_reference.py) must turn these SAME raw-VOT
+# numbers into a real score gap, per the native-owner-gap validation
+# principle (CLAUDE.md: validate by the gap, never the absolute level).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "ph, native_vot, owner_vot, min_native_score, min_gap",
+    [
+        ("p", 9.8, 1.7, 20.0, 10.0),
+        ("t", 16.0, 3.5, 20.0, 10.0),
+        ("k", 9.5, 1.6, 20.0, 10.0),
+    ],
+)
+def test_in_domain_vot_gap_meaningful(ph, native_vot, owner_vot, min_native_score, min_gap):
+    """In-domain native VOT must score non-negligibly, and beat owner by a real gap.
+
+    With the Lisker & Abramson textbook RP_VOT_MEAN_MS (67.5-87.5 ms, sd=10),
+    both native (9.5-16 ms) and owner (1.6-3.5 ms) land 6-9 SD away, so both
+    score < 2/100 and the gap is < 1 point — no discrimination at all. After
+    in-domain re-derivation, the native value (which is now near the
+    reference mean) must score meaningfully, and must beat the owner value by
+    a real margin.
+    """
+    from accent_coach.comparison.consonants.stops import score_stops
+
+    native, _ = score_stops(_sentence([], [_stop(ph, native_vot)]))
+    owner, _ = score_stops(_sentence([], [_stop(ph, owner_vot)]))
+    assert native is not None and owner is not None
+    assert native >= min_native_score, (
+        f"In-domain native /{ph}/ VOT={native_vot}ms scored {native:.1f}. "
+        f"Expected >= {min_native_score}. RP_VOT_MEAN_MS['{ph}'] is still the "
+        "Lisker & Abramson textbook value — re-derive in-domain."
+    )
+    gap = native - owner
+    assert gap >= min_gap, (
+        f"In-domain /{ph}/ gap: native({native:.1f}) - owner({owner:.1f}) = "
+        f"{gap:.1f}. Expected >= {min_gap}."
+    )
 
 
 # ---------------------------------------------------------------------------

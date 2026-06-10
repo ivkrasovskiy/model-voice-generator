@@ -238,3 +238,49 @@ def test_short_lag_not_misclassified_as_aspirated():
                 f"Short-lag stop (true={true_vot:.0f} ms) returned {vot:.1f} ms — "
                 "would be misclassified as aspirated (false positive)."
             )
+
+
+# ── Short-closure VOT collapse (prosody_consonant_upgrade.md Open item #2/#3) ─
+#
+# Real in-context /p t k/ (measure_vot_reference.py, n=20/source) measure
+# 0-22 ms even for natives, with VOT == 0.0 EXACTLY for 44-100 % of tokens in
+# EVERY corpus and group. An instrumented trace (docs/prosody_consonant_upgrade.md)
+# showed `burst_idx == closure_idx + gate_frames` in 6/6 real tokens (i.e. the
+# burst-rise THRESHOLD is already exceeded at the very first frame the gate
+# allows), and `first_voiced_after_burst` within 0-2 ms of that same frame — so
+# the `-1/_PITCH_FLOOR_HZ` onset-correction clamp floors VOT to 0.
+#
+# Root cause, confirmed by a closure_ms x vot_ms sweep on _synth_stop (clean,
+# correctly-located closure_idx by construction): `_MIN_CLOSURE_GATE_MS = 20`
+# is a FIXED offset added to closure_idx before the burst search starts. When
+# the true closure is SHORTER than 20 ms (plausible given in-domain VOT itself
+# is 0-22 ms — connected-speech closures are short), the gate pushes the search
+# start PAST the true burst and INTO/AT voicing onset, eating
+# `(20 - closure_ms)` ms of the true VOT:
+#   closure=10ms: true=10 -> measured=0.0   true=20 -> measured=5.2
+#   closure=15ms: true=10 -> measured=0.7   true=20 -> measured=8.7
+#   closure=20ms: true=5  -> measured=0.7   (gate == closure, borderline)
+# whereas closure>=25ms tracks true_vot to within ~5 ms (the existing
+# _ASPIRATION_CASES all use closure_ms 30-100, so they never exercised this).
+
+
+@pytest.mark.parametrize(
+    "vot_ms,closure_ms,seed",
+    [(15, 10, 40), (20, 10, 41), (25, 10, 42)],
+)
+def test_short_closure_vot_not_collapsed_to_zero(vot_ms, closure_ms, seed):
+    """A real (10-15 ms) closure with a clear VOT must not collapse to ~0.
+
+    `_MIN_CLOSURE_GATE_MS = 20` is a fixed post-closure offset. When the true
+    closure is shorter than the gate, the gate overshoots into/past voicing
+    onset, eating `(20 - closure_ms)` ms of the true VOT -- exactly the
+    pattern seen on real /p t k/ tokens (median VOT == 0 across every corpus).
+    """
+    audio, sr, stop, true_vot = _synth_stop(vot_ms, pre_vowel_ms=90, closure_ms=closure_ms, seed=seed)
+    vot = extract_vot(audio, sr, stop)
+    assert vot is not None, f"VOT not detected (true={true_vot:.0f}ms)"
+    assert abs(vot - true_vot) <= _ASPIRATION_TOLERANCE_MS, (
+        f"VOT={vot:.1f}ms, true={true_vot:.0f}ms (closure={closure_ms:.0f}ms) — "
+        f"short closure must not collapse VOT toward 0 "
+        f"(error={abs(vot - true_vot):.1f}ms > {_ASPIRATION_TOLERANCE_MS}ms)"
+    )

@@ -36,13 +36,23 @@ _HOP_MS = 2.0           # fine grid for burst/voicing localisation
 _FRAME_MS = 10.0
 # Closure must lie within this much of the boundary (before the following vowel).
 _CLOSURE_WINDOW_MS = 110.0
-# After the closure minimum, require at least this much silence before searching for
-# the burst.  Prevents the burst detector from firing on a noise transient in the
-# preceding vowel context (which places the closure minimum too early and then finds a
-# spurious energy rise 8–24 ms later — a systematic real-speech failure).  English
-# voiced stop closures ≥ 30 ms; voiceless ≥ 50 ms.  30 ms is conservative enough to
-# keep weak-burst tokens while rejecting closure-minimum-in-vowel artefacts.
-_MIN_CLOSURE_GATE_MS = 20.0
+# After the closure minimum, skip this many ms before searching for the burst.
+# Only needs to be > 0 frames: thresh = e_closure + frac*(e_max-e_closure) is
+# strictly greater than rms[closure_idx] = e_closure, so the closure-minimum
+# frame itself can never satisfy the burst threshold — a 1-frame gate is
+# sufficient to avoid a degenerate search range.
+#
+# Was 20 ms (rationale: skip a "noise transient in the preceding vowel, 8-24 ms
+# after the closure minimum"). On real connected speech this FIXED 20 ms offset
+# was the dominant error: an instrumented trace found burst_idx ==
+# closure_idx + gate_frames in 6/6 tokens (the threshold was already exceeded
+# at the very first frame the gate allowed), and a closure_ms x vot_ms sweep on
+# synthetic stops confirmed the mechanism — for closures shorter than the gate
+# (plausible: in-domain VOT itself is 0-22 ms, so closures are short too), the
+# fixed offset overshoots PAST the true burst and into/at voicing onset, eating
+# `(20 - closure_ms)` ms of the true VOT and collapsing it toward 0. See
+# docs/prosody_consonant_upgrade.md.
+_MIN_CLOSURE_GATE_MS = 2.0
 # Burst = first frame this fraction of the dynamic range above the closure baseline.
 _BURST_RISE_FRAC = 0.15
 # Voicing onset must persist at least this long to count (rejects transient blips).
