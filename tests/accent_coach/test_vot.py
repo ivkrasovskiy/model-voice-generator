@@ -284,3 +284,88 @@ def test_short_closure_vot_not_collapsed_to_zero(vot_ms, closure_ms, seed):
         f"short closure must not collapse VOT toward 0 "
         f"(error={abs(vot - true_vot):.1f}ms > {_ASPIRATION_TOLERANCE_MS}ms)"
     )
+
+
+# ── Realistic-acoustics VOT (prosody_consonant_upgrade.md Open item #5/#6) ────
+#
+# Every test above synthesises a stop whose BURST is the loudest broadband event
+# in the clip and whose CLOSURE is digital silence (np.zeros). Real connected
+# speech has NEITHER: a stop release burst sits ~15-25 dB BELOW the following
+# vowel (Stevens 1998, Acoustic Phonetics §7), and no real recording has a
+# digital-zero closure — there is always a noise floor / voicing bleed.
+#
+# Under those two realistic conditions the extractor collapses VOT to ~0 for
+# EVERY true value, because `e_max = rms.max()` (vot.py) is the VOWEL peak, so
+# the burst threshold `e_closure + 0.15*(e_max - e_closure)` sits at ~15 % of the
+# VOWEL. A burst that is 20 dB quieter than the vowel never reaches it, so the
+# first frame above threshold is the VOWEL ONSET — the "burst" is found at the
+# vowel and VOT reads 0. This is the real-data failure the all-silent / loud-burst
+# bench above structurally cannot exercise (its burst IS e_max, so the threshold
+# is correctly anchored). Fix: window e_max to the post-closure burst region (or
+# detect the burst as a local energy-rise peak) — Open item #6.
+#
+# These tests are EXPECTED TO FAIL against the current extractor and must pass
+# once the burst threshold is anchored locally rather than to the global max.
+
+# Real release-burst level relative to the following vowel: ~20 dB down.
+_REALISTIC_BURST_AMP = 0.06
+# Closure noise floor (room tone / voicing bleed): no real closure is digital 0.
+_REALISTIC_CLOSURE_FLOOR = 0.05
+
+
+def _synth_realistic_stop(
+    vot_ms: float, pre_vowel_ms: float = 90.0, closure_ms: float = 60.0, seed: int = 0,
+) -> tuple[np.ndarray, int, PhonemeInstance, float]:
+    """Like _synth_stop but with REAL acoustics: a quiet burst (well below the
+    following vowel) over a non-silent closure (noise floor / voicing bleed)."""
+    rng = np.random.default_rng(seed)
+    closure = (
+        np.zeros(int(closure_ms / 1000 * SR))
+        + rng.standard_normal(int(closure_ms / 1000 * SR)) * _REALISTIC_CLOSURE_FLOOR
+    )
+    parts = [
+        _voiced(pre_vowel_ms / 1000),
+        closure,
+        rng.standard_normal(int(0.005 * SR)) * _REALISTIC_BURST_AMP,              # quiet burst
+        rng.standard_normal(max(1, int(vot_ms / 1000 * SR))) * _REALISTIC_BURST_AMP * 0.35,
+        _voiced(0.18),                                                            # loud vowel
+    ]
+    audio = np.concatenate(parts).astype(np.float32)
+    audio, sr = normalize_audio(audio, SR)
+    t_closure = pre_vowel_ms / 1000
+    stop = PhonemeInstance(phoneme="p", arpabet="P", start_time=t_closure,
+                           end_time=t_closure + 0.05, sentence_id=1, word="pa", is_stressed=True)
+    return audio, sr, stop, vot_ms
+
+
+@pytest.mark.parametrize("vot_ms,seed", [(40, 50), (70, 51), (100, 52)])
+def test_realistic_quiet_burst_vot_not_collapsed(vot_ms, seed):
+    """A clear long VOT must survive a realistic quiet burst + non-silent closure.
+
+    `e_max` is the global window max = the VOWEL peak here, so the burst threshold
+    sits at ~15 % of the vowel and the (20 dB quieter) burst never trips it — the
+    detector fires at vowel onset and VOT collapses to ~0. Anchor the threshold to
+    the local burst region instead (Open item #6).
+    """
+    audio, sr, stop, true_vot = _synth_realistic_stop(vot_ms, seed=seed)
+    vot = extract_vot(audio, sr, stop)
+    assert vot is not None, f"VOT not detected (true={true_vot:.0f}ms)"
+    assert abs(vot - true_vot) <= 25.0, (
+        f"VOT={vot:.1f}ms, true={true_vot:.0f}ms — a burst 20 dB below the vowel was "
+        "missed; threshold is anchored to the vowel (global e_max), not the burst."
+    )
+
+
+def test_realistic_short_vs_long_discriminable():
+    """Aspiration trackability under real acoustics: a short-lag (25 ms) and a
+    long-lag aspirated (90 ms) stop must separate by >= 30 ms with a quiet burst
+    over a non-silent closure — the whole point of measuring VOT."""
+    a_s, sr, st_s, _ = _synth_realistic_stop(25, seed=60)
+    a_l, _, st_l, _ = _synth_realistic_stop(90, seed=61)
+    vot_s = extract_vot(a_s, sr, st_s)
+    vot_l = extract_vot(a_l, sr, st_l)
+    assert vot_s is not None and vot_l is not None, "Both VOTs must be measurable."
+    assert vot_l - vot_s >= 30, (
+        f"long={vot_l:.1f} short={vot_s:.1f} ms — realistic-acoustics VOT must still "
+        "separate aspirated from short-lag by >=30 ms."
+    )

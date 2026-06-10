@@ -966,4 +966,40 @@ owner *above* native speakers. Summary of outcomes (full detail + open items in
 
 **Still open:** up-weighting absent-in-target-accent markers (/r/, /θ ð/, aspiration),
 production-grade VOT (AutoVOT), lateral single-token noise, /θ ð/ CoG re-measurement.
+
+---
+
+## VOT closure-gate micro-fix + critical review (2026-06-10)
+
+TDD fix for a suspected burst-detection bug (`_MIN_CLOSURE_GATE_MS=20` overshooting the
+true burst on short closures), followed by an independent review agent auditing the fix's
+real-world impact against real-token traces.
+
+- **Change**: `_MIN_CLOSURE_GATE_MS` 20ms → 2ms (`accent_coach/pipeline/vot.py`) — the
+  logical minimum (1 frame), since `thresh > e_closure` by construction means the
+  closure-minimum frame can never satisfy the burst threshold itself.
+- **Tests**: new `test_short_closure_vot_not_collapsed_to_zero` (3 cases) went RED→GREEN on
+  a synthetic closure_ms×vot_ms sweep. Full suite: 240 passed, 3 failed (pre-existing item
+  #2), 10 skipped, ruff clean.
+- **Review findings (n=15 real RP tokens + all 9 owner /t/ tokens)**: the original "6/6
+  tokens hit `burst_idx==closure_idx+gate_frames`" trace did not replicate (0/15 at gate=2,
+  5/15 at gate=20); the gate=2 change moved only 2/15 RP tokens (+3.6/+4.7ms) and 0/9 owner
+  /t/ tokens (bit-identical, not a caching artefact).
+- **New doubt — gap stability**: re-running the SAME gate=20 config gave a very different
+  native−owner gap than the 2026-06-09 result (+8.0/+12.5/+8.0 → -18.1/+13.9/-3.5 for
+  p/t/k); /p/ and /k/ sign-flip between runs at n=20-24. Only /t/ (+12.5 to +13.9) is
+  consistent. The 2026-06-09 "+8/+12.5/+8, was 0/0/0" claim should be treated as
+  not-reproduced, not as a settled baseline.
+- **New suspected dominant root causes (untouched, see prosody_consonant_upgrade.md item
+  #5)**: `e_max = rms.max()` over the full 300ms post-window lands 100-200ms into the
+  following vowel for real tokens (vowel-dominated burst threshold); and the
+  `1/_PITCH_FLOOR_HZ ≈ 13.3ms` onset-correction clamp floors `vot_ms` to exactly 0 whenever
+  `first_voiced` is within ~13.3ms of the burst — confirmed on all 9 owner /t/ tokens.
+
+**Verdict**: gate=2 kept (no regression, simpler/more-correct constant) but its claimed
+real-world impact is NOT validated — do not cite "+8/+12.5/+8, was 0/0/0" as settled. Item
+#2 (reference re-derivation) remains blocked. Recommended next step: investigate item #5
+(e_max windowing + onset-correction clamp) and re-measure the native−owner gap at larger n
+(≥40-50/group) before drawing any conclusion about /p/ /k/ direction. Full doubts/numbers in
+[prosody_consonant_upgrade.md](prosody_consonant_upgrade.md).
 Governance + post-mortem lessons codified in CLAUDE.md.

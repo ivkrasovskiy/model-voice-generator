@@ -142,7 +142,14 @@
       "Bash(tee /tmp/vot_after_fix.log)",
       "Bash(git diff *)",
       "Bash(cp /tmp/vot_synth_check.py /Users/ivkrasovskii/model-voice-generator/vot_synth_check_tmp.py)",
-      "Bash(rm /Users/ivkrasovskii/model-voice-generator/vot_synth_check_tmp.py)"
+      "Bash(rm /Users/ivkrasovskii/model-voice-generator/vot_synth_check_tmp.py)",
+      "Bash(cat)",
+      "Bash(rm /Users/ivkrasovskii/model-voice-generator/owner_measure_tmp.py /Users/ivkrasovskii/model-voice-generator/owner_t_diag_tmp.py)",
+      "Bash(timeout 580 .venv/bin/python scripts/tools/measure_vot_reference.py --n 20 > /tmp/vot_full_run.log 2>&1; tail -40 /tmp/vot_full_run.log)",
+      "Bash(rm /Users/ivkrasovskii/model-voice-generator/owner_repro_tmp.py)",
+      "Bash(rm /Users/ivkrasovskii/model-voice-generator/owner_t_full_diag_tmp.py)",
+      "Bash(rm /Users/ivkrasovskii/model-voice-generator/emax_check_tmp.py)",
+      "Bash(rm -f /Users/ivkrasovskii/model-voice-generator/owner_t_diag_tmp.py; rtk git status --porcelain)"
     ],
     "additionalDirectories": [
       "/private/tmp",

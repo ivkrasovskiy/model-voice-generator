@@ -14,7 +14,7 @@ the blow-by-blow session history is summarised in [accent_coach_history.md](acce
 | Fricatives | **DONE** — bandwidth confound fixed; reference re-derived **in-domain** from native speakers; owner no longer scores above natives. |
 | Rhotic /r/ | **DONE** — strong discriminator (native−owner gap ≈ +34). |
 | Lateral /l/ | works; single-token variance (backlog). |
-| VOT / aspiration | **FUNCTIONAL, not production-grade** — collapse-to-0 fixed, pitch-detection latency bias fixed (18 ms → ~5 ms error on synthetic), closure-gate fix restores real-speech discrimination (was 0 ms for ALL groups → native−owner gap now +8/+12.5/+8 ms for /p t k/); real-speech absolute values still well under the 50–100 ms English range → AutoVOT is the robust path. |
+| VOT / aspiration | **FUNCTIONAL, not production-grade, gap status UNVERIFIED** — pitch-detection latency bias fixed (18 ms → ~5 ms error on synthetic). The "closure-gate fix restores discrimination (+8/+12.5/+8 for p/t/k)" claim from 2026-06-09 did **not** replicate in a 2026-06-10 re-run at the same gate (-18.1/+13.9/-3.5) — /p/ and /k/ sign-flip between runs at n=20-24, suggesting the gap is dominated by sampling noise at this n. A further `_MIN_CLOSURE_GATE_MS` 20→2ms change (2026-06-10) is logically sound and regression-free but, per independent review, affects only 2/15 real RP tokens and 0/9 owner /t/ tokens — it does not address the dominant zero-producing mechanism. See VOT section "2026-06-10" subsection for full doubts/assumptions. |
 | /θ ð/ detection | **DONE** — phoneme-aware frication gate: /θ ð f v/ use HF>2 kHz at 0.04 threshold (was HF>3 kHz/0.20 for all fricatives). Real voiced /ð/ (strong F0 carrier, HF>3 kHz ratio ~0.05) now passes the gate. Batch yield: 12/12 diverse tokens scored (was ~0% for voiced dentals; unvoiced /θ/ already passed the old gate). CoG reference values (θ: 4500, ð: 4400) were derived under the old gate and may be biased; see potential_improvements for re-measurement. |
 
 ## Open items (priority order)
@@ -31,6 +31,15 @@ the blow-by-blow session history is summarised in [accent_coach_history.md](acce
 3. **VOT real-speech absolute accuracy → AutoVOT / Dr.VOT** (trained models; refs below). Even
    after the closure-gate fix, native VOT measures 9.5-16 ms vs the 50-100 ms textbook range.
 4. **Lateral single-token confidence weighting** — flag/down-weight sub-scores from < ~3 tokens.
+5. **VOT extractor: `e_max`-windowing + `_onset_correction_s` clamp (new, 2026-06-10)** —
+   independent review identified these as the likely DOMINANT zero-producing mechanisms,
+   unaffected by the gate change: (a) `e_max = rms.max()` over the full 300 ms post-window
+   lands 100-200 ms into the FOLLOWING VOWEL on real tokens, making the burst threshold
+   vowel-dominated rather than burst-dominated; (b) `voice_t_local = max(burst_t_local,
+   first_voiced - 1/_PITCH_FLOOR_HZ)` clamps VOT to 0 whenever `first_voiced` is within
+   ~13.3 ms of the burst — confirmed on all 9 owner /t/ tokens. Before touching either,
+   re-run the native−owner gap at larger n (≥40-50/group) to establish whether the gap is
+   even stable enough to validate against — see subsection below.
 
 *(Item removed: /θ ð/ gate bug — fixed 2026-06-09. Phoneme-aware gate; HF>2 kHz / 0.04
 threshold for /θ ð f v/. CoG reference re-measurement deferred to potential_improvements.)*
@@ -38,6 +47,11 @@ threshold for /θ ð f v/. CoG reference re-measurement deferred to potential_im
 *(Item removed: VOT collapse-to-0 on real speech + /k/ score inversion — fixed 2026-06-09/10.
 Pitch-detection latency bias (+18ms) and burst-mislocation (`_MIN_CLOSURE_GATE_MS=20`) both
 fixed; native−owner raw-VOT gap now +8/+12.5/+8 ms for /p t k/, was 0/0/0. See VOT section.)*
+
+**CAVEAT (2026-06-10, see VOT section subsection below):** the "+8/+12.5/+8, was 0/0/0" claim
+above did not replicate in a same-gate re-run (-18.1/+13.9/-3.5). The "was 0/0/0" framing is
+also now suspect — re-opened informally pending item #2/#5 work; not re-added to the numbered
+Open items list to avoid re-litigating, but should not be cited as settled.
 
 ## Design principles (these calibrate the whole pipeline — also CLAUDE.md rules)
 
@@ -157,6 +171,78 @@ pattern as the pre-fix fricative CoG bandwidth confound (see Fricatives section)
 pipeline** (mirroring `measure_fricative_cog.py`) would likely turn the current ~0 native−owner
 score gap into something like the raw-VOT gap (+8/+12.5/+8 ms ⇒ large z-score separation once
 the reference mean matches the measurable range). Deferred — see Open items.
+
+## VOT — 2026-06-10: gate 20→2ms micro-fix, critical review, open doubts
+
+**Change made**: `_MIN_CLOSURE_GATE_MS` 20 → 2 ms (`accent_coach/pipeline/vot.py`). Rationale:
+the 2 ms gate is the logical minimum (1 frame) — `thresh > e_closure = rms[closure_idx]` by
+construction, so the closure-minimum frame itself can never satisfy the burst threshold; no
+gate smaller than 1 frame is possible, and nothing smaller than 1 frame is needed. New test
+`test_short_closure_vot_not_collapsed_to_zero` (3 cases, `tests/accent_coach/test_vot.py`)
+went RED→GREEN on a synthetic closure_ms×vot_ms sweep. Full suite after the change: 240
+passed, 3 failed (pre-existing item #2 `test_in_domain_vot_gap_meaningful`), 10 skipped, ruff
+clean (one pre-existing F841 in `test_consonants_quality.py:786`, predates this change,
+verified via `git stash`).
+
+**What this change does NOT do, per independent review (n=15 real RP tokens + all 9 owner
+/t/ tokens, instrumented trace)**:
+- The original diagnosis claimed `burst_idx == closure_idx + gate_frames` in 6/6 traced
+  tokens (i.e. the gate itself was eating the burst). At n=15 this held for only **0/15**
+  tokens at gate=2 and **5/15** at gate=20. The 6/6 trace was likely a non-representative
+  sample (it sorted clips by duration descending and took the first 6, not a random sample).
+- Changing gate 20→2 altered only **2/15** real RP tokens, both small (+3.64 ms, +4.67 ms).
+- **Owner /t/ (9/9 tokens) is completely unaffected** — bit-identical VOT before/after. This
+  is why the owner row in the re-measurement below didn't move; it is NOT a caching bug.
+
+**DOUBT — the native−owner gap itself may not be stable at n=20-24.** Two measurements at the
+SAME gate (20 ms) gave very different gaps:
+
+| run | n/group | gap p | gap t | gap k |
+|---|---|---|---|---|
+| 2026-06-09 (status table, prior session) | 24 | **+8.0** | +12.5 | **+8.0** |
+| 2026-06-10 (this session, re-run, gate=20) | 20 | **-18.1** | +13.9 | **-3.5** |
+| 2026-06-10 (this session, gate=2) | 20 | -14.1 | +13.6 | -3.1 |
+
+/t/ is consistent (+12.5 to +13.9) across all three. /p/ and /k/ **sign-flip** between the two
+gate=20 runs (+8.0→-18.1 and +8.0→-3.5) — a swing far larger than the gate=2-vs-gate=20 delta
+(-18.1→-14.1, -3.5→-3.1). This means: (1) the 2026-06-09 "+8/+12.5/+8, was 0/0/0" result for
+/p/ and /k/ should be treated as **not reproduced**, not as a settled baseline; (2) at this
+sample size the /p/ and /k/ gap sign is not trustworthy either way — neither "inverted" nor
+"correct" should be asserted with confidence until n is much larger (item #5).
+
+**Suspected real dominant mechanisms (untouched by this session, see Open item #5)**:
+1. `e_max = rms.max()` over the full 300 ms post-window lands 100-200 ms into the following
+   vowel for real tokens → `thresh = e_closure + 0.15*(e_max - e_closure)` is set by vowel
+   energy, not burst energy — could push `burst_idx` early or late depending on the vowel's
+   relative loudness.
+2. `voice_t_local = max(burst_t_local, first_voiced - 1/_PITCH_FLOOR_HZ)` — the
+   `1/_PITCH_FLOOR_HZ ≈ 13.3 ms` subtraction, when `first_voiced` is within ~13.3 ms of
+   `burst_t_local`, clamps `voice_t_local == burst_t_local` → `vot_ms == 0.0` exactly. This
+   reproduced on **all 9** owner /t/ tokens (matches `OWNER t n=9 mean=0.0 std=0.0 %=0:100%`
+   in the table below) and is independent of `_MIN_CLOSURE_GATE_MS`.
+
+**Decision for now**: keep `_MIN_CLOSURE_GATE_MS = 2.0` (no regression, simpler/more-correct
+constant than the old fixed 20 ms heuristic) but do NOT cite it as having "restored
+discrimination" — that framing in the 2026-06-09 entries above is now disputed. Item #2
+(reference re-derivation) remains blocked on the same zero-heavy distribution as before; item
+#5 (e_max windowing + onset-correction clamp + larger-n gap stability check) is the
+recommended next investigation, NOT yet started.
+
+**Re-measurement after gate=2 (`scripts/tools/measure_vot_reference.py --n 20`, seed=42)**:
+
+```
+RP pooled:    p n=14 mean=9.8  median=0.0 std=15.3 %=0:57% %>20:21%
+              t n=40 mean=18.3 median=0.3 std=39.7 %=0:50% %>20:18%
+              k n=48 mean=9.7  median=0.0 std=26.5 %=0:75% %>20:12%
+GENAM pooled: p n=24 mean=7.5  median=0.0 %=0:62%
+              t n=38 mean=8.7  median=0.0 %=0:66%
+              k n=34 mean=8.4  median=0.0 %=0:71%
+ALL NATIVES:  p n=38 mean=8.4  median=0.0 | t n=78 mean=13.6 median=0.0 | k n=82 mean=9.1 median=0.0
+OWNER:        p n=6  mean=22.4 median=0.0 std=50.2 %=0:83%
+              t n=9  mean=0.0  median=0.0 std=0.0  %=0:100%
+              k n=6  mean=12.2 median=0.0 std=17.6 %=0:67%
+GAP (mean):   p=-14.1 (inverted), t=+13.6 (correct), k=-3.1 (inverted)
+```
 
 **Path to production-grade VOT — trained models:**
 - AutoVOT: https://github.com/MLSpeech/AutoVOT — Sonderegger & Keshet (2012) *JASA* 132(6):3965-3979
