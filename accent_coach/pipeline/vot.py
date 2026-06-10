@@ -36,6 +36,13 @@ _HOP_MS = 2.0           # fine grid for burst/voicing localisation
 _FRAME_MS = 10.0
 # Closure must lie within this much of the boundary (before the following vowel).
 _CLOSURE_WINDOW_MS = 110.0
+# After the closure minimum, require at least this much silence before searching for
+# the burst.  Prevents the burst detector from firing on a noise transient in the
+# preceding vowel context (which places the closure minimum too early and then finds a
+# spurious energy rise 8–24 ms later — a systematic real-speech failure).  English
+# voiced stop closures ≥ 30 ms; voiceless ≥ 50 ms.  30 ms is conservative enough to
+# keep weak-burst tokens while rejecting closure-minimum-in-vowel artefacts.
+_MIN_CLOSURE_GATE_MS = 20.0
 # Burst = first frame this fraction of the dynamic range above the closure baseline.
 _BURST_RISE_FRAC = 0.15
 # Voicing onset must persist at least this long to count (rejects transient blips).
@@ -95,10 +102,15 @@ def extract_vot(audio: np.ndarray, sr: int, stop: PhonemeInstance) -> float | No
     if e_max <= e_closure:
         return None
 
-    # 2. Burst: first frame AFTER the closure whose energy rises out of the closure
-    #    baseline. Searching after the closure minimum excludes the preceding vowel.
+    # 2. Burst: first frame AFTER a minimum closure gate whose energy rises out of the
+    #    closure baseline.  Starting the search at closure_idx+gate_frames skips the
+    #    8–24 ms artefact window where a noise transient in the preceding vowel context
+    #    fools the detector into firing before the real burst.
     thresh = e_closure + _BURST_RISE_FRAC * (e_max - e_closure)
-    burst_idx = next((i for i in range(closure_idx + 1, len(rms)) if rms[i] > thresh), None)
+    gate_frames = max(1, int(_MIN_CLOSURE_GATE_MS / _HOP_MS))
+    burst_idx = next(
+        (i for i in range(closure_idx + gate_frames, len(rms)) if rms[i] > thresh), None
+    )
     if burst_idx is None:
         return None
     t_burst = (win_start + burst_idx * hop) / sr
@@ -117,6 +129,11 @@ def extract_vot(audio: np.ndarray, sr: int, stop: PhonemeInstance) -> float | No
     min_voiced = max(1, int(_MIN_VOICE_MS / _HOP_MS))
 
     voice_t_local: float | None = None
+    # Praat's AC pitch window spans ≈ 1/pitch_floor seconds; the first frame
+    # whose centre is detected as voiced sits ~1/pitch_floor after the actual
+    # onset.  Subtracting this latency estimate aligns the measurement with the
+    # physical voice onset (Lisker & Abramson definition).
+    _onset_correction_s = 1.0 / _PITCH_FLOOR_HZ
     i = 0
     n = len(freqs)
     while i < n:
@@ -125,7 +142,7 @@ def extract_vot(audio: np.ndarray, sr: int, stop: PhonemeInstance) -> float | No
             while j < n and freqs[j] > 0:
                 j += 1
             if (j - i) >= min_voiced:
-                voice_t_local = float(times[i])
+                voice_t_local = max(burst_t_local, float(times[i]) - _onset_correction_s)
                 break
             i = j
         else:

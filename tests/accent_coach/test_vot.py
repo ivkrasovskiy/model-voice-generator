@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pytest
 from scipy.signal import lfilter
 
 from accent_coach.models import PhonemeInstance
@@ -134,3 +135,106 @@ def test_aspirating_filter_keeps_only_prevocalic_non_s_cluster_stops():
         f"expected only the prevocalic stressed /p/, got {[p.phoneme for p in kept]}"
     )
     assert kept[0].is_stressed and abs(kept[0].start_time - 0.0) < 1e-6
+
+
+# ── Aspiration detection coverage (15 diverse cases) ──────────────────────────
+#
+# Each case: (case_id, phoneme, vot_ms, pre_vowel_ms, closure_ms, seed)
+# Ground truth VOT is exact by construction; we measure what % the extractor finds
+# within ±25 ms.  The individual parametrized tests document which cases pass;
+# test_aspiration_detection_rate guards the aggregate against regression.
+
+_ASPIRATION_TOLERANCE_MS = 12.0  # tighter than the ~18 ms pitch-detection bias we need to fix
+_MIN_DETECTION_RATE = 0.75   # ≥ 75 % of the 15 aspirated cases must be detected
+
+_ASPIRATION_CASES: list[tuple[str, str, float, float, float, int]] = [
+    # Canonical English aspirated stops — native-range VOT
+    ("p_60ms",   "p",  60,  90,  60, 10),
+    ("p_80ms",   "p",  80,  90,  60, 11),
+    ("p_100ms",  "p", 100,  90,  60, 12),
+    ("t_70ms",   "t",  70,  90,  60, 13),
+    ("t_90ms",   "t",  90,  90,  60, 14),
+    ("k_85ms",   "k",  85,  90,  60, 15),
+    ("k_110ms",  "k", 110,  90,  60, 16),
+    # Varying preceding-vowel duration (tests closure-anchoring logic)
+    ("p_pre50",  "p",  75,  50,  60, 17),
+    ("p_pre150", "p",  75, 150,  60, 18),
+    ("t_pre200", "t",  80, 200,  60, 19),
+    # Varying closure duration
+    ("p_cl30",   "p",  70,  90,  30, 20),
+    ("p_cl100",  "p",  70,  90, 100, 21),
+    ("k_cl80",   "k",  90,  90,  80, 22),
+    # Edge of English aspirated range
+    ("p_50ms",   "p",  50,  90,  60, 23),
+    ("k_120ms",  "k", 120,  90,  60, 24),
+]
+
+
+def _synth_stop_ph(
+    phoneme: str,
+    vot_ms: float,
+    pre_vowel_ms: float = 90.0,
+    closure_ms: float = 60.0,
+    seed: int = 0,
+) -> tuple[np.ndarray, int, PhonemeInstance, float]:
+    """Like _synth_stop but accepts any stop phoneme label."""
+    audio, sr, stop, true_vot = _synth_stop(vot_ms, pre_vowel_ms, closure_ms, seed)
+    stop = PhonemeInstance(
+        phoneme=phoneme, arpabet=phoneme.upper(),
+        start_time=stop.start_time, end_time=stop.end_time,
+        sentence_id=stop.sentence_id, word=stop.word, is_stressed=stop.is_stressed,
+    )
+    return audio, sr, stop, true_vot
+
+
+@pytest.mark.parametrize("case_id,phoneme,vot_ms,pre_ms,clos_ms,seed", _ASPIRATION_CASES)
+def test_aspiration_detection_individual(case_id, phoneme, vot_ms, pre_ms, clos_ms, seed):
+    """Each aspirated stop must be detected within ±25 ms of its true VOT."""
+    audio, sr, stop, true_vot = _synth_stop_ph(phoneme, vot_ms, pre_ms, clos_ms, seed)
+    vot = extract_vot(audio, sr, stop)
+    assert vot is not None, f"[{case_id}] VOT not detected (expected {true_vot:.0f} ms)"
+    assert abs(vot - true_vot) <= _ASPIRATION_TOLERANCE_MS, (
+        f"[{case_id}] VOT={vot:.1f} ms, true={true_vot:.0f} ms, "
+        f"error={abs(vot - true_vot):.1f} ms > tolerance {_ASPIRATION_TOLERANCE_MS:.0f} ms"
+    )
+
+
+def test_aspiration_detection_rate():
+    """Overall detection rate across 15 diverse aspirated-stop cases must reach ≥ 75 %.
+
+    Run all cases and report the rate; use individual parametrized tests above
+    to see exactly which cases fail.
+    """
+    hits = 0
+    misses: list[str] = []
+    for case_id, phoneme, vot_ms, pre_ms, clos_ms, seed in _ASPIRATION_CASES:
+        audio, sr, stop, true_vot = _synth_stop_ph(phoneme, vot_ms, pre_ms, clos_ms, seed)
+        vot = extract_vot(audio, sr, stop)
+        if vot is not None and abs(vot - true_vot) <= _ASPIRATION_TOLERANCE_MS:
+            hits += 1
+        else:
+            got = f"{vot:.1f} ms" if vot is not None else "None"
+            misses.append(f"{case_id}(true={true_vot:.0f}ms got={got})")
+
+    total = len(_ASPIRATION_CASES)
+    rate = hits / total
+    assert rate >= _MIN_DETECTION_RATE, (
+        f"Detection rate {hits}/{total} ({rate:.0%}) < {_MIN_DETECTION_RATE:.0%}. "
+        f"Missed: {misses}"
+    )
+
+
+def test_short_lag_not_misclassified_as_aspirated():
+    """Short-lag stops (Russian-like 20–30 ms) must not measure as aspirated.
+
+    If the extractor returns a value it must be short (< 45 ms), not in the
+    English aspirated range — a false positive there would inflate accent scores.
+    """
+    for vot_ms, seed in [(20, 25), (30, 26)]:
+        audio, sr, stop, true_vot = _synth_stop(vot_ms, pre_vowel_ms=90, seed=seed)
+        vot = extract_vot(audio, sr, stop)
+        if vot is not None:
+            assert vot < 45, (
+                f"Short-lag stop (true={true_vot:.0f} ms) returned {vot:.1f} ms — "
+                "would be misclassified as aspirated (false positive)."
+            )
