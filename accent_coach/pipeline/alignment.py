@@ -79,19 +79,20 @@ _ARPABET_VOWELS = frozenset(
 # Source: accent_coach/reference/bath_words.py (Wells 1982 + corpus extensions)
 # ---------------------------------------------------------------------------
 
-# Minimal word-level stress exceptions (secondary syllable is primary stress)
-_STRESS_EXCEPTIONS: dict[str, set[int]] = {
-    "because": {1}, "about": {1}, "above": {1}, "across": {1},
-    "again": {1}, "against": {1}, "ahead": {1}, "already": {1},
-    "although": {1}, "among": {1}, "around": {1}, "arrived": {1},
-    "away": {1}, "before": {1}, "belong": {1}, "below": {1},
-    "beside": {1}, "between": {1}, "beyond": {1}, "begin": {1},
-    "behind": {1}, "believe": {1}, "beneath": {1},
-    "photography": {1}, "photographer": {1}, "photographic": {2},
-    "economy": {1}, "economic": {2}, "economics": {2},
-    "democracy": {1}, "democratic": {2},
-    "original": {1}, "originality": {4},
-}
+# Weak-form function words: closed-class items that cmudict marks with lexical
+# (citation) stress but which are prosodically REDUCED — and so unaspirated — in
+# connected speech (Cruttenden 2014, *Gimson's Pronunciation of English* §11.3,
+# weak forms). Demoting these to unstressed stops the infinitival/prepositional
+# "to" (T UW1) from being scored as an aspirating-context stop. Deliberately
+# EXCLUDES modals/auxiliaries (could/would/should/can/...) and demonstratives,
+# which carry sentence stress when emphatic — a real audit heard a clearly
+# aspirated, stressed "could", so blanket-demoting auxiliaries would be wrong.
+_FUNCTION_WORDS: frozenset[str] = frozenset({
+    "a", "an", "the",                                   # articles
+    "to", "of", "for", "from", "at", "in", "into",      # prepositions
+    "on", "by", "as", "with",
+    "and", "but", "or", "nor", "than", "that",          # conjunctions
+})
 
 # Lazy-loaded cmudict
 _cmu_dict: dict[str, list[str]] | None = None
@@ -132,11 +133,21 @@ def _syllable_index(phonemes: list[str]) -> list[int]:
     return result
 
 
-def _is_word_stressed(word: str, syllable_idx: int) -> bool:
-    key = word.lower().rstrip(".,!?;:")
-    if key in _STRESS_EXCEPTIONS:
-        return syllable_idx in _STRESS_EXCEPTIONS[key]
-    return syllable_idx == 0
+def _syllable_stress(arpabet_seq: list[str], syl_indices: list[int]) -> dict[int, int]:
+    """Map syllable index → CMU stress (1 primary, 2 secondary, 0 unstressed).
+
+    English aspiration is contrastive only in a PRIMARY-stressed syllable, and
+    cmudict already encodes lexical stress as the trailing digit on each vowel
+    (AH1 primary, AH2 secondary, AH0 unstressed). Reading it here replaces the
+    "first syllable == stressed" proxy, which mislabels the onset of words
+    stressed off the first syllable (considered = K AH0…) as stressed.
+    """
+    stress: dict[int, int] = {}
+    for p, si in zip(arpabet_seq, syl_indices, strict=True):
+        if p in _ARPABET_VOWELS:
+            m = re.search(r"(\d)$", p)
+            stress[si] = int(m.group(1)) if m else 0
+    return stress
 
 
 _CHAR_WORD_SEPARATORS = frozenset({" ", "|", ""})
@@ -292,6 +303,10 @@ def _char_timestamps_to_phoneme_instances(
     word_key = re.sub(r"[^a-z']", "", word.lower())
     is_bath = word_key in _BATH_WORDS
     syl_indices = _syllable_index(arpabet_seq)
+    syl_stress = _syllable_stress(arpabet_seq, syl_indices)
+    # Weak-form function words are reduced (unaspirated) in connected speech,
+    # regardless of their cmudict citation stress.
+    is_function_word = word_key in _FUNCTION_WORDS
     n_phones = len(arpabet_seq)
     n_chars = len(char_timestamps)
 
@@ -328,7 +343,7 @@ def _char_timestamps_to_phoneme_instances(
                 end_time=end_time,
                 sentence_id=sentence_id,
                 word=word,
-                is_stressed=_is_word_stressed(word, syl_idx),
+                is_stressed=(not is_function_word) and syl_stress.get(syl_idx, 0) == 1,
             )
         )
     return instances

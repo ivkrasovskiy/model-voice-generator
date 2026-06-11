@@ -307,10 +307,14 @@ def test_short_closure_vot_not_collapsed_to_zero(vot_ms, closure_ms, seed):
 # These tests are EXPECTED TO FAIL against the current extractor and must pass
 # once the burst threshold is anchored locally rather than to the global max.
 
-# Real release-burst level relative to the following vowel: ~20 dB down.
-_REALISTIC_BURST_AMP = 0.06
-# Closure noise floor (room tone / voicing bleed): no real closure is digital 0.
-_REALISTIC_CLOSURE_FLOOR = 0.05
+# Real release-burst level: clearly above the closure floor, but well below the
+# following vowel (~26 dB down vs the 0.6 vowel) — the regime where a global
+# e_max anchor puts the burst threshold at ~15 % of the vowel and misses it.
+_REALISTIC_BURST_AMP = 0.03
+# Closure noise floor (room tone / voicing bleed) ~ -40 dB: no real closure is
+# digital 0, but it sits far below the burst (so the burst is detectable in
+# principle — the failure is the threshold anchor, not a burst buried in noise).
+_REALISTIC_CLOSURE_FLOOR = 0.005
 
 
 def _synth_realistic_stop(

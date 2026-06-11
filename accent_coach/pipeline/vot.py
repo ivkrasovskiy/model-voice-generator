@@ -55,6 +55,17 @@ _CLOSURE_WINDOW_MS = 110.0
 _MIN_CLOSURE_GATE_MS = 2.0
 # Burst = first frame this fraction of the dynamic range above the closure baseline.
 _BURST_RISE_FRAC = 0.15
+# The dynamic range for that threshold is anchored to the BURST region, not the
+# whole window. The global RMS max is the following VOWEL, which sits ~15-25 dB
+# above a stop release burst (Stevens 1998, Acoustic Phonetics §7). Anchoring to
+# it sets the burst threshold at ~15 % of the vowel, so a normal (quiet) burst
+# never trips it and the detector fires at vowel onset → VOT collapses to ~0
+# (docs/prosody_consonant_upgrade.md Open item #6). e_max is therefore taken over
+# a window that starts at the closure energy-minimum and is long enough to reach
+# the burst at the closure offset — connected-speech voiceless closures run
+# ~40-90 ms (Crystal & House 1988; Byrd 1993) — yet short enough that the
+# following vowel, separated from the burst by the aspiration interval, stays out.
+_BURST_WINDOW_MS = 70.0
 # Voicing onset must persist at least this long to count (rejects transient blips).
 _MIN_VOICE_MS = 20.0
 # Pitch (periodicity) range for a male/female voice — F0-constrained so aspiration
@@ -108,7 +119,11 @@ def extract_vot(audio: np.ndarray, sr: int, stop: PhonemeInstance) -> float | No
     closure_n = min(len(rms), int(_CLOSURE_WINDOW_MS / _HOP_MS))
     closure_idx = int(np.argmin(rms[:closure_n]))
     e_closure = float(rms[closure_idx])
-    e_max = float(rms.max())
+    # Anchor the burst threshold to the burst region, not the (vowel-dominated)
+    # global max — see _BURST_WINDOW_MS. The window runs from the closure minimum
+    # forward far enough to contain the burst at the closure offset.
+    burst_win = min(len(rms), closure_idx + max(1, int(_BURST_WINDOW_MS / _HOP_MS)))
+    e_max = float(rms[closure_idx:burst_win].max())
     if e_max <= e_closure:
         return None
 

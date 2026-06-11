@@ -56,6 +56,62 @@ def test_filter_vowels():
     assert len(vowels) == 2
 
 
+def _stop_stress(word: str, stop_ipa: str) -> bool:
+    """is_stressed of the first `stop_ipa` in `word` via the real char path."""
+    inst = next(p for p in _word_phonemes(word) if p.phoneme == stop_ipa)
+    return inst.is_stressed
+
+
+# ── Lexical stress from CMU digits, not "first syllable" ──────────────────────
+#
+# English aspiration needs a PRIMARY-STRESSED syllable-initial stop. The stress
+# flag must come from the CMU stress digit on the syllable's vowel (already in the
+# ARPABET sequence), NOT from "is this the word's first syllable". A real audit of
+# missed /p t k/ showed the syllable-0 proxy mislabels the onset of words stressed
+# off the first syllable (considered, consists, continuous → K AH0…, unstressed)
+# as stressed, polluting the aspiration ground truth. See docs.
+
+
+def test_initial_stress_words_marked_stressed():
+    """Onset stop of a first-syllable-stressed word is stressed (CMU digit 1)."""
+    assert _stop_stress("could", "k")      # K UH1 D
+    assert _stop_stress("talking", "t")    # T AO1 K IH0 NG
+    assert _stop_stress("paper", "p")      # P EY1 P ER0
+
+
+def test_unstressed_initial_syllable_stops_not_stressed():
+    """Onset stop of a word stressed OFF the first syllable is NOT stressed.
+
+    These are the false 'missed aspiration' tokens — they correctly read ~0 VOT
+    because the syllable is unstressed; the old syllable-0 proxy mislabelled them.
+    """
+    assert not _stop_stress("considered", "k")   # K AH0 N S IH1 D ER0 D
+    assert not _stop_stress("consists", "k")     # K AH0 N S IH1 S T S
+    assert not _stop_stress("continuous", "k")   # K AH0 N T IH1 N Y UW0 AH0 S
+
+
+def test_stress_exceptions_subsumed_by_cmu():
+    """Words formerly in the hand-maintained _STRESS_EXCEPTIONS get correct stress
+    straight from CMU, so the patch dict can be deleted. 'because' = B IH0 K AO1 Z:
+    its first-syllable schwa is unstressed."""
+    first_vowel = next(p for p in _word_phonemes("because") if p.phoneme in IPA_VOWELS)
+    assert not first_vowel.is_stressed
+
+
+def test_function_words_destressed():
+    """Weak-form function words are reduced in connected speech: their stops must
+    NOT count as aspirating context, even though cmudict gives them citation
+    stress. The infinitival/prepositional 'to' (T UW1) is the key case."""
+    assert not _stop_stress("to", "t")     # T UW1 — citation-stressed, but weak form
+    assert not _stop_stress("into", "t")   # IH0 N T UW0 — already unstressed too
+
+
+def test_modals_not_destressed():
+    """Modals/auxiliaries are NOT in the weak-form set — a real audit heard a
+    clearly stressed, aspirated 'could', so they must stay stressable."""
+    assert _stop_stress("could", "k")      # K UH1 D — content/emphatic, keep stressed
+
+
 def test_filter_stops_stressed_only():
     phonemes = [
         _phoneme("p", 0.0, 0.05, stressed=True),

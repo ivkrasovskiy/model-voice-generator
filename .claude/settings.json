@@ -149,7 +149,10 @@
       "Bash(rm /Users/ivkrasovskii/model-voice-generator/owner_repro_tmp.py)",
       "Bash(rm /Users/ivkrasovskii/model-voice-generator/owner_t_full_diag_tmp.py)",
       "Bash(rm /Users/ivkrasovskii/model-voice-generator/emax_check_tmp.py)",
-      "Bash(rm -f /Users/ivkrasovskii/model-voice-generator/owner_t_diag_tmp.py; rtk git status --porcelain)"
+      "Bash(rm -f /Users/ivkrasovskii/model-voice-generator/owner_t_diag_tmp.py; rtk git status --porcelain)",
+      "Bash(.venv/bin/python scripts/tools/measure_vot_reference.py --n 10 --seed 42)",
+      "Bash(echo \"EXIT $?\")",
+      "Bash(rtk grep *)"
     ],
     "additionalDirectories": [
       "/private/tmp",
