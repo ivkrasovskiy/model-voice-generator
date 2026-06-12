@@ -116,6 +116,24 @@ def _seq(*specs):
     return out
 
 
+def test_aspirating_filter_s_suppression_is_same_word_only():
+    """Post-/s/ suppression is tautosyllabic. An /s/ ending the PREVIOUS word must
+    NOT suppress a word-initial stop ("as kind" → /k/ stays aspirated); only a
+    same-word /sk/ cluster ("skin") is suppressed. Heard FP: "as can do"."""
+    from accent_coach.pipeline.alignment import filter_aspirating_stops
+
+    def _p(ipa, t, word):
+        return PhonemeInstance(phoneme=ipa, arpabet=ipa.upper(), start_time=t,
+                               end_time=t + 0.04, sentence_id=1, word=word, is_stressed=True)
+
+    cross = [_p("s", 0.0, "as"), _p("k", 0.1, "kind"), _p("aɪ", 0.2, "kind")]
+    assert [p.phoneme for p in filter_aspirating_stops(cross)] == ["k"], (
+        "word-initial /k/ after a previous word's /s/ must remain aspirating context"
+    )
+    same = [_p("s", 0.0, "skin"), _p("k", 0.1, "skin"), _p("ɪ", 0.2, "skin")]
+    assert filter_aspirating_stops(same) == [], "same-word /sk/ cluster must be suppressed"
+
+
 def test_aspirating_filter_keeps_only_prevocalic_non_s_cluster_stops():
     """VOT must be measured only on aspirating-context stops (the accent signal).
 

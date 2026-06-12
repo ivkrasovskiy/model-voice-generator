@@ -466,10 +466,14 @@ def filter_aspirating_stops(phonemes: list[PhonemeInstance]) -> list[PhonemeInst
         if p.phoneme not in stop_ipas or not p.is_stressed:
             continue
         nxt = ordered[i + 1].phoneme if i + 1 < len(ordered) else None
-        prev = ordered[i - 1].phoneme if i > 0 else None
+        prev_inst = ordered[i - 1] if i > 0 else None
         if nxt not in IPA_VOWELS:   # must be prevocalic to aspirate
             continue
-        if prev == "s":             # post-/s/ → unaspirated, skip
+        # Post-/s/ suppression is TAUTOSYLLABIC (/sp st sk/ in one word). An /s/
+        # ending the PREVIOUS word does not form a cluster, so it must not suppress
+        # aspiration — "as kind", "this can" are aspirated word-initial stops, not
+        # /sk/. (Heard FP: "as can do" wrongly classed as a cluster.) Same-word /s/.
+        if prev_inst is not None and prev_inst.phoneme == "s" and prev_inst.word == p.word:
             continue
         result.append(p)
     return result
